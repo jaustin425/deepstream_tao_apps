@@ -30,7 +30,7 @@ The following pyservicemaker applications with TAO models are provided:
 
 ### 2.Prerequisites
 
-* [DeepStream SDK 8.0 GA](https://developer.nvidia.com/deepstream-sdk)
+* [DeepStream SDK 9.0 GA](https://developer.nvidia.com/deepstream-sdk)
 
     Make sure deepstream-test1 sample can run successful to verify your installation. According to the
     [document](https://docs.nvidia.com/metropolis/deepstream/dev-guide/text/DS_docker_containers.html),
@@ -115,7 +115,7 @@ Run Car License Recognization Application
 A sample of US car plate recognition:
 
 ```shell
-cd pysm-apps/deepstream_lpr_app
+cd pysm-apps/tao_others/deepstream_lpr_app
 cp  ../../../apps/tao_others/deepstream_lpr_app/dict_us.txt dict.txt
 python3 deepstream_lpr_app.py ../../../configs/app/lpr_app_us_config.yml
 ```

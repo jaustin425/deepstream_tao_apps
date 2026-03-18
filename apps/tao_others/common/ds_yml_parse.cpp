@@ -430,9 +430,9 @@ is_enc_hw_support() {
       while (fgets(device_name, 50, ptr) != NULL) {
         if (strstr(device_name,"Orin") && (strstr(device_name,"Nano")))
           enc_hw_support = FALSE;
-        }
+      }
+      fclose(ptr);
     }
-    fclose(ptr);
   } else {
     for (uint32_t i = 0; i < sizeof(dgpus_unsupport_hw_enc)/sizeof(dgpus_unsupport_hw_enc[0]); i++) {
       if (!strncasecmp(prop.name, dgpus_unsupport_hw_enc[i], strlen(dgpus_unsupport_hw_enc[i]))) {

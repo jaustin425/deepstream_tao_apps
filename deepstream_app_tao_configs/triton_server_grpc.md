@@ -17,7 +17,7 @@ To start Triton Server with DeepStream Triton container, the docker should be ru
 
 ```bash
 # start Triton docker, 10001:8001 is used to map docker container's 8000 port to host's 10000 port, these ports can be changed.
-$ sudo docker run --gpus all -it --ipc=host --rm --privileged -v /tmp/.X11-unix:/tmp/.X11-unix  -p 10000:8000 -p 10001:8001 -p 10002:8002 -v $(pwd):/samples -e DISPLAY=$DISPLAY -w /samples nvcr.io/nvidia/deepstream:7.1-gc-triton-devel
+$ sudo docker run --gpus all -it --ipc=host --rm --privileged -v /tmp/.X11-unix:/tmp/.X11-unix  -p 10000:8000 -p 10001:8001 -p 10002:8002 -v $(pwd):/samples -e DISPLAY=$DISPLAY -w /samples nvcr.io/nvidia/deepstream:9.0-gc-triton-devel
 
 $ ./prepare_triton_models.sh
 ```

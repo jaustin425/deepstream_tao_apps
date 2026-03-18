@@ -37,7 +37,9 @@ This sample demonstrates how to replace the Deepstream native NV12/RGBA->RGB(ten
 $ cd deepstream_custom_preprocessing_app
 $ git submodule update --init --recursive
 $ cd nvdspreprocess_lib
-$ export CUDA_VER=12.8 #For DS8.0 on both x86 & Jetson, CUDA_VER=12.8
+$ export CUDA_VER=<cuda_version>
+    For x86, CUDA_VER=13.1
+    For Jetson, CUDA_VER=13.0
 $ make
 ```
 
@@ -49,28 +51,49 @@ NOTE: To improve performance on specific GPUs, please add "-gencode=arch=compute
 Sample:
 
 ```bash
-gst-launch-1.0 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0  filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 nvstreammux name=mux batch-size=2 width=1920 height=1080 ! nvdspreprocess config-file=config_preprocess_frame.txt ! nvinfer input-tensor-meta=true config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.yml ! nvmultistreamtiler ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! nvdsosd ! nvvideoconvert ! nvv4l2h264enc ! h264parse ! qtmux ! filesink location=out.mp4
+gst-launch-1.0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 \
+nvstreammux name=mux batch-size=2 width=1920 height=1080 ! nvdspreprocess config-file=config_preprocess_frame.txt ! \
+nvinfer input-tensor-meta=true config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.yml ! \
+nvmultistreamtiler ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! nvdsosd ! nvvideoconvert ! nvv4l2h264enc ! h264parse ! qtmux ! filesink location=out.mp4
 ```
 
 ### Processing ROIs(nvdspreprocess + pgie)
 Sample:
 
 ```bash
-gst-launch-1.0 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0  filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 nvstreammux name=mux batch-size=2 width=1920 height=1080 ! nvdspreprocess config-file=config_preprocess_roi.txt ! nvinfer input-tensor-meta=true config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.yml ! nvmultistreamtiler ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! nvdsosd ! nvvideoconvert ! nvv4l2h264enc ! h264parse ! qtmux ! filesink location=out.mp4
+gst-launch-1.0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 \
+nvstreammux name=mux batch-size=2 width=1920 height=1080 ! nvdspreprocess config-file=config_preprocess_roi.txt ! \
+nvinfer input-tensor-meta=true config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.yml ! \
+nvmultistreamtiler ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! nvdsosd ! nvvideoconvert ! nvv4l2h264enc ! h264parse ! qtmux ! filesink location=out.mp4
 ```
 
 ### Processing Objects(pgie + nvdspreprocess + sgie)
 Sample:
 
 ```bash
-gst-launch-1.0 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0  filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 nvstreammux name=mux batch-size=2 width=1920 height=1080  ! nvinfer config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.yml ! nvdspreprocess config-file=config_preprocess_sgie.txt ! nvinfer unique-id=4 input-tensor-meta=true config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_secondary_vehicletypes.yml ! nvmultistreamtiler ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! nvdsosd ! nvvideoconvert ! nvv4l2h264enc ! h264parse ! qtmux ! filesink location=out.mp4
+gst-launch-1.0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 \
+nvstreammux name=mux batch-size=2 width=1920 height=1080 ! \
+nvinfer config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.yml ! \
+nvdspreprocess config-file=config_preprocess_sgie.txt ! \
+nvinfer unique-id=4 input-tensor-meta=true config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_secondary_vehicletypes.yml ! \
+nvmultistreamtiler ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! nvdsosd ! nvvideoconvert ! nvv4l2h264enc ! h264parse ! qtmux ! filesink location=out.mp4
 ```
 
 ### Processing RGBA Input To Nvdspreprocess
 Sample:
 
 ```bash
-gst-launch-1.0 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.jpg ! jpegparse ! jpegdec  ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! mux.sink_0 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.jpg ! jpegparse  !  jpegdec  ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! mux.sink_1 nvstreammux name=mux batch-size=2 width=1920 height=1080 ! nvdspreprocess config-file=config_preprocess_frame.txt ! nvinfer input-tensor-meta=true  batch-size=2 config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.txt ! nvmultistreamtiler ! nvdsosd ! nveglglessink
+gst-launch-1.0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.jpg ! jpegparse ! jpegdec ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! mux.sink_0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.jpg ! jpegparse ! jpegdec ! nvvideoconvert ! 'video/x-raw(memory:NVMM),format=RGBA' ! mux.sink_1 \
+nvstreammux name=mux batch-size=2 width=1920 height=1080 ! nvdspreprocess config-file=config_preprocess_frame.txt ! \
+nvinfer input-tensor-meta=true batch-size=2 config-file-path=/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_infer_primary.txt ! nvmultistreamtiler ! nvdsosd ! nveglglessink
 ```
 
 ### Processing Affine Transformation Tensors
@@ -139,9 +162,44 @@ Prerequisites:
 ### Processing Full Frame
 ```bash
 #Pipeline for pitch layout
-gst-launch-1.0 -v filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0  filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_2 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_3 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_4 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_5 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_6 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_7 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_8 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_9 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_10 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_11 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_12 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_13 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_14 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_15  nvstreammux name=mux batch-size=16 width=1920 height=1080  ! nvdspreprocess config-file=config_preprocess_frame.txt ! fakesink
-#Pipeline for block linear
-gst-launch-1.0 -v filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0  filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_2 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_3 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_4 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_5 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_6 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_7 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_8 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_9 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_10 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_11 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_12 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_13 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_14 filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4  ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_15  nvstreammux name=mux batch-size=16 width=1280 height=720  ! nvdspreprocess config-file=config_preprocess_frame.txt ! fakesink
+gst-launch-1.0 -v \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_2 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_3 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_4 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_5 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_6 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_7 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_8 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_9 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_10 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_11 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_12 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_13 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_14 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_15 \
+nvstreammux name=mux batch-size=16 width=1920 height=1080 ! nvdspreprocess config-file=config_preprocess_frame.txt ! fakesink
+
+# Pipeline for block linear
+gst-launch-1.0 -v \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_0 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_1 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_2 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_3 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_4 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_5 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_6 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_7 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_8 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_9 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_10 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_11 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_12 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_13 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_14 \
+filesrc location=/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! mux.sink_15 \
+nvstreammux name=mux batch-size=16 width=1280 height=720 ! nvdspreprocess config-file=config_preprocess_frame.txt ! fakesink
 ```
 Perf On Jetson Orin
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2024, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2021-2026, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -508,9 +508,9 @@ is_enc_hw_support() {
       while (fgets(device_name, 50, ptr) != NULL) {
         if (strstr(device_name,"Orin") && (strstr(device_name,"Nano")))
           enc_hw_support = FALSE;
-        }
+      }
+      fclose(ptr);
     }
-    fclose(ptr);
   } else {
     for (int i = 0; i < sizeof(dgpus_unsupport_hw_enc)/sizeof(dgpus_unsupport_hw_enc[0]); i++) {
       if (!strncasecmp(prop.name, dgpus_unsupport_hw_enc[i], strlen(dgpus_unsupport_hw_enc[i]))) {

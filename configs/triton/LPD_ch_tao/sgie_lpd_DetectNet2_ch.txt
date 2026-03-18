@@ -63,6 +63,9 @@ infer_config {
       }
     }
   }
+  extra {
+    output_buffer_pool_size: 8
+  }
 }
 
 input_control {

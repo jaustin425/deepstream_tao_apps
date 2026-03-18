@@ -34,15 +34,13 @@ SRCS:= postprocesslib_impl.cpp post_processor.cpp post_processor_bodypose.cpp
 INCS:= $(wildcard *.h)
 LIB:=libpostprocess_impl.so
 
-NVDS_VERSION:=8.0
-
-CFLAGS+= -fPIC -DDS_VERSION=\"8.0.0\" \
+CFLAGS+= -fPIC \
 	 -I /usr/local/cuda-$(CUDA_VER)/include \
-	 -I ../../../includes -I../includes  -I../../eigen/ -I /opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/sources/includes -I./ \
-	 -I /opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/sources/gst-plugins/gst-nvdspostprocess/includes
+	 -I ../../../includes -I../includes  -I../../eigen/ -I /opt/nvidia/deepstream/deepstream/sources/includes -I./ \
+	 -I /opt/nvidia/deepstream/deepstream/sources/gst-plugins/gst-nvdspostprocess/includes
 
-GST_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/gst-plugins/
-LIB_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/
+GST_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream/lib/gst-plugins/
+LIB_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream/lib/
 
 ifeq ($(TARGET_DEVICE),aarch64)
 	LIBS := -L/usr/lib/aarch64-linux-gnu/tegra

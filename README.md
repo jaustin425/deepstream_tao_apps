@@ -52,7 +52,7 @@ uridecoderbin -->streammux-->nvinfer(detection)-->nvosd-->
 
 ## Prerequisites
 
-* [DeepStream SDK 8.0 GA](https://developer.nvidia.com/deepstream-sdk)
+* [DeepStream SDK 9.0 GA](https://developer.nvidia.com/deepstream-sdk)
 
    Make sure deepstream-test1 sample can run successful to verify your installation. According to the
    [document](https://docs.nvidia.com/metropolis/deepstream/dev-guide/text/DS_docker_containers.html),
@@ -77,9 +77,9 @@ sudo apt update
 sudo apt install git-lfs
 git lfs install --skip-repo
 // SSH
-git clone git@github.com:NVIDIA-AI-IOT/deepstream_tao_apps.git
+git clone -b release/tao_ds9.0ga git@github.com:NVIDIA-AI-IOT/deepstream_tao_apps.git
 // or HTTPS
-git clone https://github.com/NVIDIA-AI-IOT/deepstream_tao_apps.git
+git clone -b release/tao_ds9.0ga https://github.com/NVIDIA-AI-IOT/deepstream_tao_apps.git
 //download submoudle
 git submodule update --init --recursive
 ```
@@ -134,7 +134,9 @@ And then run the app with the command:
 
 ```
 export CUDA_MODULE_LOADING=LAZY
-export CUDA_VER=xy.z                                      // xy.z is CUDA version, e.g. 10.2
+$ export CUDA_VER=<cuda_version>
+    For x86, CUDA_VER=13.1
+    For Jetson, CUDA_VER=13.0
 make
 ```
 ## Run
@@ -166,7 +168,7 @@ note:
 |Model Type|Tao Model|Demo|
 |-----------|----------|----|
 |detector|peoplenet_transformer, retail_detector_binary|./apps/tao_detection/ds-tao-detection -c configs/nvinfer/peoplenet_transformer_tao/pgie_peoplenet_transformer_tao_config.txt -i file:///$DS_SRC_PATH/samples/streams/sample_720p.mp4<br>or<br>./apps/tao_detection/ds-tao-detection configs/app/det_app_config.yml|
-|segmentation|citySemSegFormer|./apps/tao_segmentation/ds-tao-segmentation -c configs/nvinfer/citysemsegformer_tao/pgie_citysemsegformer_tao_config.txt -i file:///$DS_SRC_PATH/samples/streams/sample_720p.mp4 -w 960 -e 544<br>or<br>./apps/tao_segmentation/ds-tao-segmentation configs/app/seg_app_config.yml|
+|segmentation|citySemSegFormer|./apps/tao_segmentation/ds-tao-segmentation -c configs/nvinfer/citysemsegformer_tao/pgie_citysemsegformer_tao_config.txt -i file:///$DS_SRC_PATH/samples/streams/sample_720p.mp4 -w 1820 -e 1024<br>or<br>./apps/tao_segmentation/ds-tao-segmentation configs/app/seg_app_config.yml|
 |instance segmentation|Mask2Former|export SHOW_MASK=1; ./apps/tao_detection/ds-tao-detection -c configs/nvinfer/mask2former_tao/pgie_mask2former_tao_config.yml -i file:///$DS_SRC_PATH/samples/streams/sample_720p.mp4<br>or<br>export SHOW_MASK=1; ./apps/tao_detection/ds-tao-detection configs/app/ins_seg_app.yml|
 |others|Re-identification, Retail Object Recognition, PoseClassificationNet, OCDNet, OCRNet, LPDNet, LPRNet, BodyPose3DNet|refer detailed [README](https://github.com/NVIDIA-AI-IOT/deepstream_tao_apps/blob/master/apps/tao_others/README.md) for how to configure and run the model|
 
