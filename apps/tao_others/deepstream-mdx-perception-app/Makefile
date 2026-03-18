@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2022-2026, NVIDIA CORPORATION. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -34,6 +34,7 @@ SRCS+= /opt/nvidia/deepstream/deepstream/sources/apps/sample_apps/deepstream-app
 SRCS+= /opt/nvidia/deepstream/deepstream/sources/apps/sample_apps/deepstream-app/deepstream_app_config_parser_yaml.cpp
 SRCS+= $(wildcard /opt/nvidia/deepstream/deepstream/sources/apps/apps-common/src/*.c)
 SRCS+= $(wildcard /opt/nvidia/deepstream/deepstream/sources/apps/apps-common/src/deepstream-yaml/*.cpp)
+SRCS+= $(wildcard /opt/nvidia/deepstream/deepstream/sources/libs/nvds_msgapi_common_src/*.cpp)
 
 INCS:= $(wildcard *.h)
 
@@ -50,7 +51,7 @@ CFLAGS+= -I/opt/nvidia/deepstream/deepstream/sources/apps/apps-common/includes \
 
 LIBS:= -L/usr/local/cuda/lib64/ -lcudart
 LIBS+= -L$(LIB_INSTALL_DIR) -lnvdsgst_meta -lnvds_meta -lnvdsgst_helper -lnvdsgst_customhelper \
-	   -lnvdsgst_smartrecord -lnvds_utils -lnvds_msgbroker -lm \
+	   -lnvdsgst_smartrecord -lnvds_utils -lnvds_msgbroker -lm -lnvds_logger -lcrypto \
        -lyaml-cpp -lcuda -lgstrtspserver-1.0 -ldl -Wl,-rpath,$(LIB_INSTALL_DIR)
 
 CFLAGS+= $(shell pkg-config --cflags $(PKGS))

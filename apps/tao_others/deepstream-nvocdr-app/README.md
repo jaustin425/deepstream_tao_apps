@@ -21,8 +21,11 @@ Refer to [NVIDIA-Optical-Character-Detection-and-Recognition-Solution](https://g
 ```shell
 # git clone https://github.com/NVIDIA-AI-IOT/NVIDIA-Optical-Character-Detection-and-Recognition-Solution.git nvocdr
 $ git submodule update --init --recursive
+$ export CUDA_VER=<cuda_version>
+    For x86, CUDA_VER=13.1
+    For Jetson, CUDA_VER=13.0
 $ make -C nvocdr
-$ make -C nvocdr/deepstream CUDA_VER=xx.x # (For Jetpack 7.0 xx.x is 12.9)
+$ make -C nvocdr/deepstream
 $ cp nvocdr/libnvocdr.so /opt/nvidia/deepstream/deepstream/lib/
 $ cp nvocdr/deepstream/libnvocdr_impl.so /opt/nvidia/deepstream/deepstream/lib/
 $ sudo ldconfig

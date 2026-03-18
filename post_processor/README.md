@@ -1,16 +1,21 @@
 # DeepStream Post-Processor 
 
 ## Build
+```bash
+  $ export CUDA_VER=<cuda_version>
+      For x86, CUDA_VER=13.1
+      For Jetson, CUDA_VER=13.0
+```
 
 ### Release build
 ```bash
-CUDA_VER=12.6 make
+  $ sudo make
 ```
 libnvds_infercustomparser_tao.so will be generated in current directory
 
 ### Debug build
 ```bash
-CUDA_VER=12.6 make debug
+  $ sudo make debug
 ```
 libnvds_infercustomparser_tao_debug.so will be generated in current directory
 
