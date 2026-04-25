@@ -108,6 +108,19 @@ A sample of Chinese car plate recognition:
     ./deepstream-lpr-app ../../../configs/app/lpr_app_ch_config.yml
 ```
 
+  ### Jetson Worktree Note
+
+  For this machine, the Jetson-specific checkout lives in the sibling worktree
+  `/home/jason/Projects/alpr-deepstream/deepstream_tao_apps-jetson` on branch
+  `jetson-alpr`, while the laptop checkout stays in
+  `/home/jason/Projects/alpr-deepstream/deepstream_tao_apps` on `master`.
+
+  The Jetson worktree is configured with a worktree-local ignore file at
+  `.git/worktrees/deepstream_tao_apps-jetson/info/exclude` through
+  `git config --worktree core.excludesFile ...` so generated binaries, object
+  files, downloaded model assets, and local validation media do not clutter
+  `git status` in the Jetson checkout.
+
 ## Notice
 1. This sample application only support mp4 files which contain H264 videos as input files.
 2. For Chinese plate recognition, please make sure the OS supports Chinese language.
