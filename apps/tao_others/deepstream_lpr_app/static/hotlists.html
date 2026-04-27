@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ALPR Hotlists</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/hotlists.css?v=20260420-hotlists-1">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">Hotlist Management</div>
+      <h1>Agency Files And Local Overlay</h1>
+    </div>
+    <div class="topbar-actions">
+      <a class="nav-link" href="/">Live Events</a>
+      <a class="nav-link" href="/config">Camera Config</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="main-column">
+      <section class="panel summary-panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Hotlist Summary</div>
+            <div id="summaryMeta" class="panel-subtitle">Loading status...</div>
+          </div>
+          <div class="summary-actions">
+            <button id="reloadBtn" class="button button-secondary" type="button">Reload From Disk</button>
+            <button id="refreshBtn" class="button button-secondary" type="button">Refresh</button>
+          </div>
+        </div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Unique Plates</div>
+            <div id="uniquePlatesStat" class="stat-value">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Entries</div>
+            <div id="totalEntriesStat" class="stat-value">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Local Overlay</div>
+            <div id="localEntriesStat" class="stat-value">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Last Reload</div>
+            <div id="lastReloadStat" class="stat-value stat-value-small">-</div>
+          </div>
+        </div>
+      </section>
+
+      <div id="messageBanner" class="message-banner hidden"></div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Agency File Upload</div>
+            <div class="panel-subtitle">Upload any combination of svs.tbl, slr.tbl, and sfr.tbl from a phone or tablet.</div>
+          </div>
+        </div>
+        <form id="agencyUploadForm" class="form-grid">
+          <label class="field">
+            <span>svs.tbl</span>
+            <input id="svsFile" name="svs_file" type="file" accept=".tbl,.txt">
+          </label>
+          <label class="field">
+            <span>slr.tbl</span>
+            <input id="slrFile" name="slr_file" type="file" accept=".tbl,.txt">
+          </label>
+          <label class="field">
+            <span>sfr.tbl</span>
+            <input id="sfrFile" name="sfr_file" type="file" accept=".tbl,.txt">
+          </label>
+          <div class="form-actions">
+            <button class="button" type="submit">Upload Agency Files</button>
+          </div>
+        </form>
+      </section>
+
+      <div class="two-up">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Manual Local Entry</div>
+              <div class="panel-subtitle">Add a single local hot plate without replacing agency files.</div>
+            </div>
+          </div>
+          <form id="manualEntryForm" class="form-grid compact-grid">
+            <label class="field">
+              <span>Plate</span>
+              <input id="manualPlate" name="plate" type="text" maxlength="12" placeholder="ABC1234" required>
+            </label>
+            <label class="field">
+              <span>List Type</span>
+              <select id="manualListType" name="list_type">
+                <option value="SLR">Stolen Plate</option>
+                <option value="SVS">Stolen Vehicle</option>
+                <option value="SFR">Felony Vehicle</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>State</span>
+              <input id="manualState" name="state" type="text" maxlength="2" value="CA" required>
+            </label>
+            <label class="field">
+              <span>County</span>
+              <input id="manualCounty" name="county_code" type="text" maxlength="2" value="00" required>
+            </label>
+            <label class="field field-wide">
+              <span>Entry Date</span>
+              <input id="manualDate" name="entry_date" type="date">
+            </label>
+            <div class="form-actions field-wide">
+              <button class="button" type="submit">Add Local Entry</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Bulk CSV Import</div>
+              <div class="panel-subtitle">Import extra plates into the local overlay. Use a `plate` column when available.</div>
+            </div>
+          </div>
+          <form id="csvUploadForm" class="form-grid compact-grid">
+            <label class="field field-wide">
+              <span>CSV File</span>
+              <input id="csvFile" name="csv_file" type="file" accept=".csv,text/csv" required>
+            </label>
+            <label class="field">
+              <span>Default List Type</span>
+              <select id="csvListType" name="default_list_type">
+                <option value="SLR">Stolen Plate</option>
+                <option value="SVS">Stolen Vehicle</option>
+                <option value="SFR">Felony Vehicle</option>
+              </select>
+            </label>
+            <div class="form-actions field-wide">
+              <button class="button" type="submit">Import CSV</button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Active Entries</div>
+            <div class="panel-subtitle">Agency and local records merged into the effective hotlist.</div>
+          </div>
+          <div class="filter-row">
+            <label class="filter-label" for="sourceKindFilter">Show</label>
+            <select id="sourceKindFilter" class="filter-select">
+              <option value="all">All Sources</option>
+              <option value="agency">Agency Files</option>
+              <option value="local">Local Overlay</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Plate</th>
+                <th>Type</th>
+                <th>Source</th>
+                <th>State</th>
+                <th>County</th>
+                <th>Date</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="entriesTableBody">
+              <tr><td colspan="7" class="empty-state">Loading hotlist entries...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <aside class="side-column">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Source Status</div>
+            <div class="panel-subtitle">Per-file update and count details.</div>
+          </div>
+        </div>
+        <div id="sourceStatusList" class="source-status-list"></div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/hotlists.js?v=20260420-hotlists-1"></script>
+</body>
+</html>

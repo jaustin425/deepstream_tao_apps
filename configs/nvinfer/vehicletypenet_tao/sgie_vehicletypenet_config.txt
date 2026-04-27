@@ -1,0 +1,26 @@
+################################################################################
+# VehicleTypeNet SGIE for DeepStream LPR app
+################################################################################
+
+[property]
+gpu-id=0
+net-scale-factor=1
+offsets=124;117;104
+onnx-file=../../../models/tao_pretrained_models/vehicletypenet/resnet18_pruned.onnx
+labelfile-path=labels_vehicletypenet.txt
+model-engine-file=../../../models/tao_pretrained_models/vehicletypenet/resnet18_pruned.onnx_b16_gpu0_fp16.engine
+infer-dims=3;224;224
+uff-input-blob-name=input_1
+batch-size=16
+process-mode=2
+model-color-format=0
+network-mode=2
+network-type=1
+num-detected-classes=6
+interval=0
+gie-unique-id=5
+operate-on-gie-id=1
+operate-on-class-ids=0
+output-blob-names=predictions/Softmax:0
+classifier-threshold=0.2
+scaling-compute-hw=1

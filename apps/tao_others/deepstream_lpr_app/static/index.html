@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ALPR Live</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="stylesheet" href="/static/styles.css?v=20260420-live-refresh-2">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="title-row">
+    <div class="title-cluster">
+      <div class="title">ALPR Live</div>
+      <a class="topbar-link" href="/hotlists">Hotlists</a>
+      <a class="topbar-link" href="/config">Camera Config</a>
+    </div>
+    <div class="banner-stack">
+      <button id="audioArmBanner" class="audio-arm-banner">Tap To Enable Live Audio</button>
+      <div id="pausedBanner" class="paused-banner hidden">Feed paused. <span id="pausedCount">0</span> new events buffered.</div>
+      <div id="offlineBanner" class="offline-banner hidden">Live feed offline. Reconnecting...</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <input id="search" placeholder="Search plate...">
+
+    <select id="sourceFilter">
+      <option value="">All Sources</option>
+      <option value="LF">LF</option>
+      <option value="RF">RF</option>
+      <option value="LR">LR</option>
+      <option value="RR">RR</option>
+    </select>
+
+    <select id="statusFilter">
+      <option value="">All</option>
+      <option value="LOCKED">Locked</option>
+      <option value="CONFIRMED">Confirmed</option>
+    </select>
+
+    <button id="hotlistOnlyBtn" class="toggle hotlist-toggle">Hotlist Only</button>
+    <button id="followBtn" class="toggle active">Auto Scroll On</button>
+    <button id="audioBtn" class="toggle active">Audio On</button>
+    <button id="testAlertBtn" class="toggle">Test Alert</button>
+    <button id="pauseBtn" class="pause-button">Pause<span id="pauseBadge" class="pause-badge hidden">0</span></button>
+  </div>
+</header>
+
+<main>
+  <section id="alprStatusBox" class="status-strip">
+    <div class="status-strip-label">ALPR STATUS</div>
+    <div class="status-row">
+      <div class="status-section-label">System Status</div>
+      <div class="status-strip-main">
+        <span id="alprAlive" class="status-chip">Unknown</span>
+      </div>
+    </div>
+    <div class="status-row">
+      <div class="status-section-label">Access</div>
+      <div id="networkAccessList" class="network-access-list"></div>
+    </div>
+    <div class="status-row">
+      <div class="status-section-label">Camera Status</div>
+      <div id="cameraStatusList" class="camera-status-list"></div>
+    </div>
+  </section>
+
+  <section id="activeAlertsSection" class="alerts-strip hidden">
+    <div class="alerts-strip-header">
+      <div>
+        <div class="alerts-strip-label">ACTIVE HOTLIST ALERTS</div>
+        <div id="activeAlertsSummary" class="alerts-strip-summary">0 alerts</div>
+      </div>
+    </div>
+    <div id="activeAlerts" class="active-alerts"></div>
+  </section>
+
+  <div id="feed"></div>
+</main>
+
+<div id="imageViewer" class="image-viewer hidden" aria-hidden="true">
+  <button id="imageViewerPrev" class="image-viewer-nav image-viewer-prev" aria-label="Previous image">Prev</button>
+  <button id="imageViewerNext" class="image-viewer-nav image-viewer-next" aria-label="Next image">Next</button>
+  <button id="imageViewerClose" class="image-viewer-close" aria-label="Close image viewer">Close</button>
+  <img id="imageViewerImg" class="image-viewer-img" alt="ALPR read image">
+</div>
+
+<script src="/static/app.js?v=20260420-live-refresh-3"></script>
+</body>
+</html>

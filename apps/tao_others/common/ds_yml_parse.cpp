@@ -192,6 +192,11 @@ ds_parse_enc_config(GstElement *encoder,
         g_object_set(G_OBJECT(encoder), "iframeinterval",
                      itr->second.as<guint>(), NULL);
       }
+      else if(paramKey == "type" || paramKey == "enc" ||
+              paramKey == "enc-type" || paramKey == "filename" ||
+              paramKey == "codec") {
+        continue;
+      }
       else {
         std::cerr << "!! [WARNING] Unknown param found : " << paramKey << std::endl;
       }
@@ -496,6 +501,10 @@ ds_parse_enc_codec(gchar *cfg_file_path, const char* group)
           val= docs[i][group]["codec"].as<guint>();
           return val;
       }
+      if (docs[i][group]["enc"]) {
+          val= docs[i][group]["enc"].as<guint>();
+          return val;
+      }
     }
   }
   return 0;
@@ -559,7 +568,6 @@ create_video_encoder(bool isH264, int enc_type, GstElement** conv_capfilter,
   GstCaps *caps = NULL;
   GstCapsFeatures *feature = NULL;
 
-  g_print("in create_video_encoder, isH264:%d, enc_type:%d\n", isH264, enc_type);
   caps =  gst_caps_new_simple ("video/x-raw", "format", G_TYPE_STRING,
           "I420", NULL);
   if(enc_type == ENCODER_TYPE_HW) {

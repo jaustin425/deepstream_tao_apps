@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ALPR Camera Config</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/config.css?v=20260419-focus-overlay-1">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">Camera Configuration</div>
+      <h1>Live Camera Preview</h1>
+    </div>
+    <div class="topbar-actions">
+      <a class="nav-link" href="/">Live Events</a>
+      <a class="nav-link" href="/hotlists">Hotlists</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="preview-panel">
+      <div class="preview-header">
+        <div>
+          <div id="selectedSourceLabel" class="panel-title">No Camera Selected</div>
+          <div id="selectedSourceMeta" class="panel-subtitle">Waiting for runtime telemetry...</div>
+        </div>
+        <div id="previewTimestamp" class="stamp">No preview yet</div>
+      </div>
+
+      <div id="cameraWarning" class="camera-warning hidden"></div>
+
+      <div id="overlayToolbar" class="overlay-toolbar"></div>
+
+      <div class="focus-legend" aria-label="Plate focus legend">
+        <div class="focus-chip is-red">Red: plate unreadable</div>
+        <div class="focus-chip is-yellow">Yellow: close, but not reliable yet</div>
+        <div class="focus-chip is-green">Green: plate is reading cleanly</div>
+      </div>
+
+      <div class="preview-grid">
+        <div class="preview-stack">
+          <div id="previewShell" class="preview-shell show-grid show-crosshair show-safe-zone">
+            <div class="preview-stage">
+              <div class="preview-media-frame">
+                <img id="previewImage" class="preview-image hidden" alt="Camera preview">
+                <div id="previewDetections" class="preview-detections hidden"></div>
+              </div>
+            </div>
+            <div class="preview-guides" aria-hidden="true">
+              <div class="guide-thirds"></div>
+              <div class="guide-crosshair"></div>
+              <div class="guide-safe-zone"></div>
+            </div>
+            <div id="previewEmpty" class="preview-empty">Waiting for preview frame...</div>
+          </div>
+          <div class="preview-help">
+            Use the overlay guides for aiming and horizon alignment. The zoom pane stays on the raw preview, while the main view now shows live plate boxes, OCR text, and confidence-based focus color.
+          </div>
+        </div>
+
+        <div class="zoom-panel">
+          <div class="zoom-header">
+            <div class="panel-title">Center Zoom</div>
+            <div class="panel-subtitle">2.4x crop for focus checks</div>
+          </div>
+          <div class="zoom-shell">
+            <img id="zoomImage" class="zoom-image hidden" alt="Center zoom preview">
+            <div id="zoomEmpty" class="preview-empty">No zoom preview yet.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <section class="status-card">
+        <div class="panel-title">Runtime</div>
+        <div id="runtimeSummary" class="runtime-summary">Loading...</div>
+      </section>
+
+      <section class="status-card">
+        <div class="panel-title">Access</div>
+        <div id="networkAccessPanel" class="network-access-panel">Loading...</div>
+      </section>
+
+      <section class="status-card">
+        <div class="panel-title">Sources</div>
+        <div id="sourceList" class="source-list"></div>
+      </section>
+
+      <section class="status-card">
+        <div class="panel-title">Camera Diagnostics</div>
+        <div id="diagnosticsPanel" class="diagnostics-panel">Waiting for source telemetry...</div>
+      </section>
+
+      <section class="status-card">
+        <div class="panel-title">Camera Controls</div>
+        <div id="controlsPanel" class="controls-panel">No configurable camera selected.</div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/config.js?v=20260419-focus-overlay-1"></script>
+</body>
+</html>

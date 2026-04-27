@@ -25,7 +25,7 @@ CFLAGS:= -Wall -Werror -std=c++11 -shared -fPIC
 
 CFLAGS+= -I/opt/nvidia/deepstream/deepstream/sources/includes
 
-LIBS:= -lnvinfer
+LIBS:= -lnvinfer -ldl
 LFLAGS:= -Wl,--start-group $(LIBS) -Wl,--end-group
 
 SRCFILES:= nvinfer_custom_lpr_parser.cpp

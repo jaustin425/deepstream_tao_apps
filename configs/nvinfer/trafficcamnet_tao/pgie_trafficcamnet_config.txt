@@ -38,28 +38,14 @@ interval=0
 gie-unique-id=1
 output-blob-names=output_bbox/BiasAdd:0;output_cov/Sigmoid:0
 cluster-mode=2
-scaling-compute-hw=1
+scaling-compute-hw=2
 
-#Use the config params below for dbscan clustering mode
-#[class-attrs-all]
-#detected-min-w=4
-#detected-min-h=4
-#minBoxes=3
-#eps=0.7
-
-#Use the config params below for NMS clustering mode
 [class-attrs-all]
 topk=20
 nms-iou-threshold=0.5
 pre-cluster-threshold=0.2
 
-## Per class configurations
 [class-attrs-0]
 topk=20
 nms-iou-threshold=0.5
 pre-cluster-threshold=0.4
-
-#[class-attrs-1]
-#pre-cluster-threshold=0.05
-#eps=0.7
-#dbscan-min-score=0.5

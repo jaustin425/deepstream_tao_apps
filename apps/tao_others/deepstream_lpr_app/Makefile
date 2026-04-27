@@ -33,20 +33,27 @@ ifeq ($(TARGET_DEVICE),aarch64)
 endif
 
 SRCS:= deepstream_lpr_app.cpp \
+       evidence_logger.cpp \
        deepstream_nvdsanalytics_meta.cpp \
        ../common/ds_yml_parse.cpp
 
 OBJS:= $(SRCS:.cpp=.o)
 
-PKGS:= gstreamer-1.0
+OPENCV_PKG:= $(shell pkg-config --exists opencv4 && echo opencv4 || echo opencv)
+RTSP_SERVER_PKG:= $(shell pkg-config --exists gstreamer-rtsp-server-1.0 && echo gstreamer-rtsp-server-1.0)
+PKGS:= gstreamer-1.0 $(RTSP_SERVER_PKG) $(OPENCV_PKG)
 CFLAGS:=$(shell pkg-config --cflags $(PKGS))
-CFLAGS+=-Wall -Werror -Wno-unused-function \
+CFLAGS+=-g -O0 -Wall -Wno-unused-function \
+       -pthread \
         -I/opt/nvidia/deepstream/deepstream/sources/includes \
         -I/usr/local/cuda/include \
+       -I/usr/include/opencv4 \
         -I../common/
 
 LIBS:= $(shell pkg-config --libs $(PKGS))
 LIBS+= -L$(LIB_INSTALL_DIR) -lnvdsgst_meta -lnvds_meta -lm -lstdc++\
+       -pthread \
+       -lnvbufsurface \
        -lnvds_yml_parser -lyaml-cpp -lgstrtspserver-1.0 -Wl,-rpath,$(LIB_INSTALL_DIR) \
        -L/usr/local/cuda/lib64/ -lcudart
 
@@ -56,7 +63,7 @@ all: $(APP)
 	$(CXX) -c -o $@ $(CFLAGS) $<
 
 $(APP): $(OBJS)
-	@$(CC) -o $(APP) $(OBJS) $(LIBS)
+	@$(CXX) -o $(APP) $(OBJS) $(LIBS)
 	@make -C nvinfer_custom_lpr_parser
 
 clean:

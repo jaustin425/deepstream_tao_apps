@@ -1,0 +1,34 @@
+# Build outputs
+*.o
+*.so
+deepstream-lpr-app
+
+# TensorRT engines
+*.engine
+
+# Logs / temp
+*.log
+*.tmp
+logs/
+runtime/
+
+# Generated evidence sessions
+evidence/case_*/
+
+# Hotlist runtime state
+hotlists/hotlist_manifest.json
+hotlists/local_hotlist_entries.json
+
+# Python junk
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Large model artifacts if regenerated locally
+models/**/*.engine
