@@ -1261,3 +1261,222 @@ h1 {
     font-size: 11px;
   }
 }
+/* ── Camera management additions ──────────────────────────────────────── */
+
+.sources-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.source-add-btn {
+  border: 1px solid rgba(87, 209, 140, 0.65);
+  background: rgba(87, 209, 140, 0.08);
+  color: var(--good);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.source-add-btn:hover {
+  background: rgba(87, 209, 140, 0.15);
+}
+
+.source-entry {
+  display: grid;
+  gap: 6px;
+}
+
+.source-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.source-inline-rename {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.source-inline-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.source-inline-input:focus {
+  outline: none;
+  border-color: rgba(240, 178, 75, 0.65);
+}
+
+.source-action-btn {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.source-action-btn:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.source-action-remove {
+  color: #f29d9d;
+  border-color: rgba(242, 157, 157, 0.35);
+}
+
+.source-action-remove:hover {
+  background: rgba(242, 157, 157, 0.08);
+  border-color: rgba(242, 157, 157, 0.65);
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(5, 8, 11, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 28px;
+  width: 100%;
+  max-width: 480px;
+  display: grid;
+  gap: 20px;
+}
+
+.modal-title {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.modal-body {
+  display: grid;
+  gap: 14px;
+}
+
+.modal-label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.modal-hint {
+  font-weight: 400;
+}
+
+.modal-input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  width: 100%;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: rgba(240, 178, 75, 0.65);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.modal-cancel {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modal-cancel:hover {
+  color: var(--text);
+}
+
+/* Config saved banner */
+.config-changes-banner {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  background: rgba(19, 26, 34, 0.96);
+  border: 1px solid rgba(240, 178, 75, 0.65);
+  border-radius: 999px;
+  color: var(--accent-2);
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+
+.config-changes-banner button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.config-changes-banner button:hover {
+  color: var(--text);
+}
+
+.config-changes-restart {
+  border: 1px solid rgba(87, 209, 140, 0.65) !important;
+  background: rgba(87, 209, 140, 0.12) !important;
+  color: #b5ffcf !important;
+  border-radius: 999px !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  padding: 6px 12px !important;
+  line-height: 1.2 !important;
+}
+
+.config-changes-restart:hover {
+  background: rgba(87, 209, 140, 0.2) !important;
+}

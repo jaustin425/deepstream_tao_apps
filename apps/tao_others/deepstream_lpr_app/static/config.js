@@ -23,6 +23,7 @@ let currentPreviewUrl = "";
 let displayedPreviewUrl = "";
 let previewLoadToken = 0;
 let previewWarningMessage = "";
+let inlineRenameSourceKey = null;
 
 function absolutePreviewUrl(url) {
   try {
@@ -473,7 +474,7 @@ async function applyPreset(source, preset, statusNode, button) {
 function renderSourceList(sources) {
   sourceList.innerHTML = "";
   if (!Array.isArray(sources) || sources.length === 0) {
-    sourceList.textContent = "No camera sources reported yet.";
+    sourceList.textContent = "No camera sources configured.";
     return;
   }
 
@@ -483,6 +484,9 @@ function renderSourceList(sources) {
   }
 
   for (const source of sources) {
+    const entry = document.createElement("div");
+    entry.className = "source-entry";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = `source-button${source.source === selectedSource ? " active" : ""}`;
@@ -500,7 +504,7 @@ function renderSourceList(sources) {
 
     const code = document.createElement("div");
     code.className = "source-code";
-    code.textContent = `${source.source} - ${source.source_label || source.source}`;
+    code.textContent = `${source.source_label || source.source}`;
     topline.appendChild(code);
 
     const state = document.createElement("div");
@@ -519,7 +523,7 @@ function renderSourceList(sources) {
 
     const detail = document.createElement("div");
     detail.className = "source-detail";
-    detail.textContent = `Pipeline source: ${source.process_source_name || "n/a"} | Last seen ${formatTime(source.last_seen_utc)}`;
+    detail.textContent = `Camera ID: ${source.process_source_name || "n/a"} | ${source.enabled ? "ENABLED" : "DISABLED"} | Last seen ${formatTime(source.last_seen_utc)}`;
 
     button.appendChild(topline);
     button.appendChild(metrics);
@@ -532,7 +536,80 @@ function renderSourceList(sources) {
       button.appendChild(device);
     }
 
-    sourceList.appendChild(button);
+    entry.appendChild(button);
+
+    // Per-source management actions
+    const actions = document.createElement("div");
+    actions.className = "source-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.className = "source-action-btn";
+    renameBtn.textContent = "Rename";
+    renameBtn.onclick = () => beginInlineRename(source.process_source_name);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "source-action-btn source-action-remove";
+    removeBtn.textContent = "Remove";
+    removeBtn.onclick = () => removeCamera(source.process_source_name, source.source);
+
+    const enableBtn = document.createElement("button");
+    enableBtn.type = "button";
+    enableBtn.className = "source-action-btn";
+    enableBtn.textContent = source.enabled ? "Disable" : "Enable";
+    enableBtn.onclick = () => setCameraEnabled(source.process_source_name, !source.enabled);
+
+    actions.appendChild(renameBtn);
+    actions.appendChild(enableBtn);
+    actions.appendChild(removeBtn);
+    entry.appendChild(actions);
+
+    if (inlineRenameSourceKey === source.process_source_name) {
+      const renameInline = document.createElement("div");
+      renameInline.className = "source-inline-rename";
+
+      const renameInput = document.createElement("input");
+      renameInput.type = "text";
+      renameInput.className = "source-inline-input";
+      renameInput.maxLength = 64;
+      renameInput.value = source.source;
+      renameInput.placeholder = "Camera name";
+      renameInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          submitInlineRename(source.process_source_name, renameInput.value.trim());
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancelInlineRename();
+        }
+      });
+
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "source-action-btn";
+      saveBtn.textContent = "Save";
+      saveBtn.onclick = () => submitInlineRename(source.process_source_name, renameInput.value.trim());
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "source-action-btn";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = cancelInlineRename;
+
+      renameInline.appendChild(renameInput);
+      renameInline.appendChild(saveBtn);
+      renameInline.appendChild(cancelBtn);
+      entry.appendChild(renameInline);
+
+      requestAnimationFrame(() => {
+        renameInput.focus();
+        renameInput.select();
+      });
+    }
+
+    sourceList.appendChild(entry);
   }
 }
 
@@ -567,8 +644,14 @@ function renderPreview(sources) {
 
   if (source.preview_url) {
     const separator = source.preview_url.includes("?") ? "&" : "?";
-    const imagePath = absolutePreviewUrl(`${source.preview_url}${separator}t=${encodeURIComponent(source.preview_updated_utc || source.last_seen_utc || Date.now())}`);
-    if (imagePath !== currentPreviewUrl) {
+    const previewToken = source.preview_mode === "direct"
+      ? Date.now()
+      : (source.preview_updated_utc || source.last_seen_utc || Date.now());
+    const imagePath = absolutePreviewUrl(`${source.preview_url}${separator}t=${encodeURIComponent(previewToken)}`);
+    if (source.preview_mode === "direct") {
+      currentPreviewUrl = imagePath;
+      commitPreviewImage(imagePath);
+    } else if (imagePath !== currentPreviewUrl) {
       queuePreviewImage(imagePath);
     } else if (overlayState.zoom && displayedPreviewUrl) {
       zoomImage.classList.remove("hidden");
@@ -761,3 +844,245 @@ renderOverlayToolbar();
 applyOverlayState();
 refresh();
 setInterval(refresh, 1000);
+
+// ─── Camera management ───────────────────────────────────────────────────────
+
+let renameModalSourceKey = null;
+
+function showConfigChangesBanner() {
+  document.getElementById("configChangesBanner").classList.remove("hidden");
+}
+
+function openAddCameraModal() {
+  document.getElementById("addCameraUri").value = "";
+  document.getElementById("addCameraName").value = "";
+  setStatusText(document.getElementById("addCameraStatus"), "");
+  document.getElementById("addCameraModal").classList.remove("hidden");
+  document.getElementById("addCameraUri").focus();
+}
+
+function closeAddCameraModal() {
+  document.getElementById("addCameraModal").classList.add("hidden");
+}
+
+function openRenameModal(sourceKey, currentName) {
+  renameModalSourceKey = sourceKey;
+  const nameInput = document.getElementById("renameCameraName");
+  nameInput.value = currentName || "";
+  setStatusText(document.getElementById("renameCameraStatus"), "");
+  document.getElementById("renameCameraModal").classList.remove("hidden");
+  nameInput.focus();
+  nameInput.select();
+}
+
+function closeRenameModal() {
+  document.getElementById("renameCameraModal").classList.add("hidden");
+  renameModalSourceKey = null;
+}
+
+function beginInlineRename(sourceKey) {
+  inlineRenameSourceKey = sourceKey;
+  renderSourceList(currentSources);
+}
+
+function cancelInlineRename() {
+  inlineRenameSourceKey = null;
+  renderSourceList(currentSources);
+}
+
+async function submitInlineRename(sourceKey, nextName) {
+  if (!sourceKey) return;
+  const name = (nextName || "").trim();
+  if (!name) {
+    window.alert("Camera name is required.");
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/camera-source/${encodeURIComponent(sourceKey)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = payload.detail || `request failed: ${response.status}`;
+      const msg = Array.isArray(detail) ? detail.map((e) => e.msg).join("; ") : String(detail);
+      throw new Error(msg);
+    }
+    inlineRenameSourceKey = null;
+    showConfigChangesBanner();
+    await refresh();
+  } catch (error) {
+    window.alert(`Failed to rename camera: ${error.message}`);
+  }
+}
+
+async function submitAddCamera() {
+  const uri = document.getElementById("addCameraUri").value.trim();
+  const name = document.getElementById("addCameraName").value.trim();
+  const statusEl = document.getElementById("addCameraStatus");
+  const submitBtn = document.getElementById("addCameraSubmit");
+
+  setStatusText(statusEl, "Saving...", "warn");
+  submitBtn.disabled = true;
+
+  try {
+    const response = await fetch("/api/camera-source", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uri, name }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = payload.detail || `request failed: ${response.status}`;
+      const msg = Array.isArray(detail) ? detail.map((e) => e.msg).join("; ") : String(detail);
+      throw new Error(msg);
+    }
+    closeAddCameraModal();
+    showConfigChangesBanner();
+    await refresh();
+  } catch (error) {
+    setStatusText(statusEl, error.message, "error");
+  } finally {
+    submitBtn.disabled = false;
+  }
+}
+
+async function submitRenameCamera() {
+  if (!renameModalSourceKey) return;
+  const name = document.getElementById("renameCameraName").value.trim();
+  const statusEl = document.getElementById("renameCameraStatus");
+  const submitBtn = document.getElementById("renameCameraSubmit");
+
+  setStatusText(statusEl, "Saving...", "warn");
+  submitBtn.disabled = true;
+
+  try {
+    const response = await fetch(`/api/camera-source/${encodeURIComponent(renameModalSourceKey)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = payload.detail || `request failed: ${response.status}`;
+      const msg = Array.isArray(detail) ? detail.map((e) => e.msg).join("; ") : String(detail);
+      throw new Error(msg);
+    }
+    closeRenameModal();
+    showConfigChangesBanner();
+    await refresh();
+  } catch (error) {
+    setStatusText(statusEl, error.message, "error");
+  } finally {
+    submitBtn.disabled = false;
+  }
+}
+
+async function removeCamera(sourceKey, label) {
+  const confirmed = window.confirm(
+    `Remove camera "${label}" (${sourceKey}) from the config?\n\nThis will take effect after the ALPR pipeline is restarted.`
+  );
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/api/camera-source/${encodeURIComponent(sourceKey)}`, {
+      method: "DELETE",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `request failed: ${response.status}`);
+    }
+    showConfigChangesBanner();
+    await refresh();
+  } catch (error) {
+    window.alert(`Failed to remove camera: ${error.message}`);
+  }
+}
+
+async function setCameraEnabled(sourceKey, enabled) {
+  try {
+    const response = await fetch(`/api/camera-source/${encodeURIComponent(sourceKey)}/enabled`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `request failed: ${response.status}`);
+    }
+    showConfigChangesBanner();
+    await refresh();
+  } catch (error) {
+    window.alert(`Failed to update camera state: ${error.message}`);
+  }
+}
+
+async function restartAlprNow() {
+  const restartBtn = document.getElementById("configChangesRestart");
+  restartBtn.disabled = true;
+  const previousText = restartBtn.textContent;
+  restartBtn.textContent = "Restarting...";
+
+  try {
+    const response = await fetch("/api/alpr-restart", { method: "POST" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `request failed: ${response.status}`);
+    }
+    document.getElementById("configChangesBanner").classList.add("hidden");
+    await refresh();
+  } catch (error) {
+    window.alert(`ALPR restart failed: ${error.message}`);
+  } finally {
+    restartBtn.disabled = false;
+    restartBtn.textContent = previousText;
+  }
+}
+
+// Modal event wiring
+function bindClick(id, handler) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.addEventListener("click", handler);
+  }
+}
+
+function bindKeydown(id, handler) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.addEventListener("keydown", handler);
+  }
+}
+
+bindClick("addCameraBtn", openAddCameraModal);
+bindClick("addCameraSubmit", submitAddCamera);
+bindClick("addCameraCancel", closeAddCameraModal);
+bindClick("addCameraModal", (e) => {
+  if (e.target === e.currentTarget) closeAddCameraModal();
+});
+bindKeydown("addCameraUri", (e) => {
+  if (e.key === "Enter") submitAddCamera();
+  if (e.key === "Escape") closeAddCameraModal();
+});
+bindKeydown("addCameraName", (e) => {
+  if (e.key === "Enter") submitAddCamera();
+  if (e.key === "Escape") closeAddCameraModal();
+});
+bindClick("renameCameraSubmit", submitRenameCamera);
+bindClick("renameCameraCancel", closeRenameModal);
+bindClick("renameCameraModal", (e) => {
+  if (e.target === e.currentTarget) closeRenameModal();
+});
+bindKeydown("renameCameraName", (e) => {
+  if (e.key === "Enter") submitRenameCamera();
+  if (e.key === "Escape") closeRenameModal();
+});
+bindClick("configChangesDismiss", () => {
+  const banner = document.getElementById("configChangesBanner");
+  if (banner) {
+    banner.classList.add("hidden");
+  }
+});
+bindClick("configChangesRestart", restartAlprNow);

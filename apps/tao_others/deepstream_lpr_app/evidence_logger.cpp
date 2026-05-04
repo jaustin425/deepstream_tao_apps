@@ -601,14 +601,49 @@ static int open_gps_serial_fd(const std::string& device_path, int baud_rate) {
     return fd;
 }
 
+static int open_gps_tcp_fd(const std::string& host, int port) {
+    struct addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo* result = nullptr;
+    const std::string port_text = std::to_string(port);
+    if (getaddrinfo(host.c_str(), port_text.c_str(), &hints, &result) != 0) {
+        return -1;
+    }
+
+    int fd = -1;
+    for (struct addrinfo* item = result; item != nullptr; item = item->ai_next) {
+        fd = socket(item->ai_family, item->ai_socktype, item->ai_protocol);
+        if (fd < 0) {
+            continue;
+        }
+        if (connect(fd, item->ai_addr, item->ai_addrlen) == 0) {
+            break;
+        }
+        close(fd);
+        fd = -1;
+    }
+
+    freeaddrinfo(result);
+    return fd;
+}
+
 static void gps_reader_loop() {
+    const std::string gps_host = trim_copy(getenv_string("ALPR_GPS_HOST")).empty()
+        ? "192.168.1.1"
+        : trim_copy(getenv_string("ALPR_GPS_HOST"));
+    const int gps_port = getenv_int("ALPR_GPS_PORT", 11010);
     const std::string device_path = trim_copy(getenv_string("ALPR_GPS_DEVICE")).empty()
-        ? "/dev/ttyUSB0"
+        ? ""
         : trim_copy(getenv_string("ALPR_GPS_DEVICE"));
     const int baud_rate = getenv_int("ALPR_GPS_BAUD", 4800);
 
     while (true) {
-        int fd = open_gps_serial_fd(device_path, baud_rate);
+        int fd = open_gps_tcp_fd(gps_host, gps_port);
+        if (fd < 0 && !device_path.empty()) {
+            fd = open_gps_serial_fd(device_path, baud_rate);
+        }
         if (fd < 0) {
             std::this_thread::sleep_for(std::chrono::seconds(2));
             continue;
@@ -933,7 +968,8 @@ static std::string build_live_event_payload(const EvidenceEvent& ev,
     out << "\"gps_timestamp_utc\":" << json_string_or_null(ev.gps_fix_valid ? ev.gps_timestamp_utc : std::string()) << ',';
     out << "\"full_frame_path\":\"" << json_escape(case_relative_path(ev.full_frame_path)) << "\",";
     out << "\"annotated_frame_path\":\"" << json_escape(case_relative_path(ev.annotated_frame_path)) << "\",";
-    out << "\"plate_crop_path\":\"" << json_escape(case_relative_path(ev.plate_crop_path)) << "\"";
+    out << "\"plate_crop_path\":\"" << json_escape(case_relative_path(ev.plate_crop_path)) << "\",";
+    out << "\"vehicle_crop_path\":\"" << json_escape(case_relative_path(ev.vehicle_crop_path)) << "\"";
     out << "}";
     return out.str();
 }
@@ -1274,6 +1310,20 @@ static std::vector<FooterLine> build_crop_footer_lines(const std::string& event_
     return lines;
 }
 
+static std::vector<FooterLine> build_vehicle_crop_footer_lines(const std::string& event_id,
+                                                               const std::string& plate,
+                                                               const std::string& vehicle_make,
+                                                               const std::string& vehicle_type,
+                                                               const std::string& vehicle_color) {
+    std::vector<FooterLine> lines;
+    lines.push_back({"PLATE: " + plate, 0.40});
+    lines.push_back({"MAKE: " + (vehicle_make.empty() ? std::string("Unknown") : vehicle_make), 0.40});
+    lines.push_back({"TYPE: " + (vehicle_type.empty() ? std::string("Unknown") : vehicle_type), 0.40});
+    lines.push_back({"COLOR: " + (vehicle_color.empty() ? std::string("Unknown") : vehicle_color), 0.40});
+    lines.push_back({"EVT: " + compact_event_label(event_id), 0.40});
+    return lines;
+}
+
 static cv::Mat prepare_plate_crop_for_footer(const cv::Mat& crop) {
     if (crop.empty()) {
         return crop;
@@ -1487,12 +1537,13 @@ bool ensure_session_json(const std::string& evidence_root,
         << "  \"model_version\": \"" << json_escape(model_version) << "\",\n"
         << "  \"created_utc\": \"" << json_escape(g_session_created_utc) << "\",\n"
         << "  \"gps\": {\n"
-        << "    \"device\": \""
-        << json_escape(trim_copy(getenv_string("ALPR_GPS_DEVICE")).empty()
-                           ? "/dev/ttyUSB0"
-                           : trim_copy(getenv_string("ALPR_GPS_DEVICE")))
-        << "\",\n"
-        << "    \"baud\": " << getenv_int("ALPR_GPS_BAUD", 4800) << "\n"
+        << "    \"source\": \"mifi-tcp\",\n"
+        << "    \"endpoint\": \""
+        << json_escape(
+               (trim_copy(getenv_string("ALPR_GPS_HOST")).empty() ? "192.168.1.1" : trim_copy(getenv_string("ALPR_GPS_HOST")))
+               + ":" + std::to_string(getenv_int("ALPR_GPS_PORT", 11010))
+           )
+        << "\"\n"
         << "  }";
 
     if (reject_threshold >= 0 || lock_threshold >= 0) {
@@ -1555,9 +1606,11 @@ bool append_event_jsonl(const std::string& jsonl_path, const EvidenceEvent& ev) 
         << "},"
         << "\"full_frame_path\":\"" << json_escape(ev.full_frame_path) << "\","
         << "\"plate_crop_path\":\"" << json_escape(ev.plate_crop_path) << "\","
+        << "\"vehicle_crop_path\":\"" << json_escape(ev.vehicle_crop_path) << "\","
         << "\"annotated_frame_path\":\"" << json_escape(ev.annotated_frame_path) << "\"," 
         << "\"full_frame_sha256\":\"" << json_escape(ev.full_frame_sha256) << "\","
         << "\"plate_crop_sha256\":\"" << json_escape(ev.plate_crop_sha256) << "\","
+        << "\"vehicle_crop_sha256\":\"" << json_escape(ev.vehicle_crop_sha256) << "\","
         << "\"annotated_frame_sha256\":\"" << json_escape(ev.annotated_frame_sha256) << "\"," 
         << "\"model_version\":\"" << json_escape(ev.model_version) << "\","
         << "\"notes\":\"" << json_escape(ev.notes) << "\""
@@ -1664,6 +1717,7 @@ bool write_evidence_event(const cv::Mat& frame,
                          std::string(event_type == "LOCKED" ? "locked" : "confirmed");
     ev.full_frame_path = "frames/" + prefix + "_full.jpg";
     ev.plate_crop_path = "frames/" + prefix + "_plate.jpg";
+    ev.vehicle_crop_path = "frames/" + prefix + "_vehicle.jpg";
     if (event_type == "LOCKED") {
         ev.annotated_frame_path = "frames/" + prefix + "_annotated.jpg";
     }
@@ -1671,6 +1725,7 @@ bool write_evidence_event(const cv::Mat& frame,
     if (frame.empty()) {
         ev.full_frame_path.clear();
         ev.plate_crop_path.clear();
+        ev.vehicle_crop_path.clear();
         ev.annotated_frame_path.clear();
         ev.notes = "auto-generated by ALPR pipeline; image capture unavailable (empty frame)";
         bool json_ok = append_event_jsonl(evidence_root + "/events.jsonl", ev);
@@ -1682,10 +1737,13 @@ bool write_evidence_event(const cv::Mat& frame,
 
     std::string full_frame_abs = evidence_root + "/" + ev.full_frame_path;
     std::string plate_crop_abs = evidence_root + "/" + ev.plate_crop_path;
+    std::string vehicle_crop_abs = evidence_root + "/" + ev.vehicle_crop_path;
 
     cv::Rect plate_rect(plate_left, plate_top, plate_width, plate_height);
+    cv::Rect vehicle_rect(veh_left, veh_top, veh_width, veh_height);
     cv::Rect bounds(0, 0, frame.cols, frame.rows);
     plate_rect = plate_rect & bounds;
+    vehicle_rect = vehicle_rect & bounds;
     if (plate_rect.width <= 0 || plate_rect.height <= 0) {
         return false;
     }
@@ -1712,6 +1770,28 @@ bool write_evidence_event(const cv::Mat& frame,
 
     ev.full_frame_sha256 = sha256_file(full_frame_abs);
     ev.plate_crop_sha256 = sha256_file(plate_crop_abs);
+
+    if (vehicle_rect.width > 0 && vehicle_rect.height > 0) {
+        cv::Mat vehicle_crop = frame(vehicle_rect).clone();
+        FooterStyle vehicle_style;
+        vehicle_style.font_scale = 0.40;
+        vehicle_style.min_font_scale = 0.32;
+        vehicle_style.line_gap = 6;
+        vehicle_style.top_pad = 10;
+        vehicle_style.bottom_pad = 10;
+        cv::Mat traced_vehicle = with_trace_footer(
+            vehicle_crop,
+            build_vehicle_crop_footer_lines(trace_event_id, ev.plate,
+                                            ev.vehicle_make, ev.vehicle_type, ev.vehicle_color),
+            vehicle_style);
+        if (cv::imwrite(vehicle_crop_abs, traced_vehicle)) {
+            ev.vehicle_crop_sha256 = sha256_file(vehicle_crop_abs);
+        } else {
+            ev.vehicle_crop_path.clear();
+        }
+    } else {
+        ev.vehicle_crop_path.clear();
+    }
 
     if (event_type == "LOCKED" && !ev.annotated_frame_path.empty()) {
         cv::Mat annotated = render_review_frame(frame, ev, case_id, trace_event_id, true);
@@ -1784,23 +1864,28 @@ bool write_debug_event(const cv::Mat& frame,
     std::string prefix = ev.event_id + "_debug";
     ev.full_frame_path = "debug/frames/" + prefix + "_full.jpg";
     ev.plate_crop_path = "debug/frames/" + prefix + "_plate.jpg";
+    ev.vehicle_crop_path = "debug/frames/" + prefix + "_vehicle.jpg";
 
     if (frame.empty()) {
         ev.full_frame_path.clear();
         ev.plate_crop_path.clear();
+        ev.vehicle_crop_path.clear();
         ev.notes = "DEBUG ONLY - NOT EVIDENCE; image capture unavailable (empty frame)";
         return append_event_jsonl(debug_root + "/debug.jsonl", ev);
     }
 
     cv::Rect plate_rect(plate_left, plate_top, plate_width, plate_height);
+    cv::Rect vehicle_rect(veh_left, veh_top, veh_width, veh_height);
     cv::Rect bounds(0, 0, frame.cols, frame.rows);
     plate_rect = plate_rect & bounds;
+    vehicle_rect = vehicle_rect & bounds;
     if (plate_rect.width <= 0 || plate_rect.height <= 0) {
         return false;
     }
 
     std::string full_frame_abs = evidence_root + "/" + ev.full_frame_path;
     std::string plate_crop_abs = evidence_root + "/" + ev.plate_crop_path;
+    std::string vehicle_crop_abs = evidence_root + "/" + ev.vehicle_crop_path;
 
     cv::Mat review_full = render_review_frame(frame, ev, case_id, trace_event_id, true);
     if (!cv::imwrite(full_frame_abs, review_full)) {
@@ -1824,6 +1909,28 @@ bool write_debug_event(const cv::Mat& frame,
 
     ev.full_frame_sha256 = sha256_file(full_frame_abs);
     ev.plate_crop_sha256 = sha256_file(plate_crop_abs);
+
+    if (vehicle_rect.width > 0 && vehicle_rect.height > 0) {
+        cv::Mat vehicle_crop = frame(vehicle_rect).clone();
+        FooterStyle vehicle_style;
+        vehicle_style.font_scale = 0.40;
+        vehicle_style.min_font_scale = 0.32;
+        vehicle_style.line_gap = 6;
+        vehicle_style.top_pad = 10;
+        vehicle_style.bottom_pad = 10;
+        cv::Mat traced_vehicle = with_trace_footer(
+            vehicle_crop,
+            build_vehicle_crop_footer_lines(trace_event_id, ev.plate,
+                                            ev.vehicle_make, ev.vehicle_type, ev.vehicle_color),
+            vehicle_style);
+        if (cv::imwrite(vehicle_crop_abs, traced_vehicle)) {
+            ev.vehicle_crop_sha256 = sha256_file(vehicle_crop_abs);
+        } else {
+            ev.vehicle_crop_path.clear();
+        }
+    } else {
+        ev.vehicle_crop_path.clear();
+    }
 
     return append_event_jsonl(debug_root + "/debug.jsonl", ev);
 }

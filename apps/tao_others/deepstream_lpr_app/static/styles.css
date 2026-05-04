@@ -301,6 +301,58 @@ main {
   gap: 8px;
 }
 
+.gps-status-wrap {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gps-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.gps-status-connected {
+  border-color: rgba(63, 179, 126, 0.45);
+  background: rgba(22, 94, 52, 0.18);
+  color: #9ae6b4;
+}
+
+.gps-status-warning {
+  border-color: rgba(237, 137, 54, 0.42);
+  background: rgba(122, 76, 5, 0.22);
+  color: #fbd38d;
+}
+
+.gps-status-disconnected {
+  border-color: rgba(245, 101, 101, 0.32);
+  background: rgba(122, 36, 0, 0.16);
+  color: #feb2b2;
+}
+
+.gps-status-detail {
+  min-width: 0;
+  color: #d7e7f7;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .network-access-chip {
   display: inline-flex;
   align-items: center;

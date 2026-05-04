@@ -19,6 +19,8 @@ const alprAlive = document.getElementById("alprAlive");
 const alprStatusBox = document.getElementById("alprStatusBox");
 const networkAccessList = document.getElementById("networkAccessList");
 const cameraStatusList = document.getElementById("cameraStatusList");
+const gpsStatusChip = document.getElementById("gpsStatusChip");
+const gpsStatusDetail = document.getElementById("gpsStatusDetail");
 const imageViewer = document.getElementById("imageViewer");
 const imageViewerImg = document.getElementById("imageViewerImg");
 const imageViewerClose = document.getElementById("imageViewerClose");
@@ -442,6 +444,13 @@ function formatTime(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], { hour12: false });
+}
+
 function formatStorage(gb) {
   if (gb === null || gb === undefined) return "-";
   return `${gb.toFixed ? gb.toFixed(1) : gb} GB`;
@@ -748,6 +757,36 @@ function renderStatus(status) {
     link.title = item.note ? `${item.note} | ${item.url}` : item.url;
     networkAccessList.appendChild(link);
   }
+
+  const gpsStatus = status && status.gps_status ? status.gps_status : {};
+  const gpsConnected = Boolean(gpsStatus.connected);
+  const gpsFixValid = Boolean(gpsStatus.fix_valid);
+  gpsStatusChip.className = "gps-status-chip";
+  if (gpsConnected && gpsFixValid) {
+    gpsStatusChip.classList.add("gps-status-connected");
+    gpsStatusChip.textContent = "FIX";
+  } else if (gpsConnected) {
+    gpsStatusChip.classList.add("gps-status-warning");
+    gpsStatusChip.textContent = "NO FIX";
+  } else {
+    gpsStatusChip.classList.add("gps-status-disconnected");
+    gpsStatusChip.textContent = "DISCONNECTED";
+  }
+
+  const gpsParts = [];
+  if (gpsStatus.source) {
+    gpsParts.push(String(gpsStatus.source).toUpperCase());
+  }
+  if (gpsStatus.endpoint) {
+    gpsParts.push(String(gpsStatus.endpoint));
+  }
+  if (gpsFixValid) {
+    gpsParts.push(`${Number(gpsStatus.latitude).toFixed(6)}, ${Number(gpsStatus.longitude).toFixed(6)}`);
+  }
+  if (gpsStatus.last_received_utc) {
+    gpsParts.push(`Last ${formatDateTime(gpsStatus.last_received_utc)}`);
+  }
+  gpsStatusDetail.textContent = gpsParts.join(" | ") || "MiFi GPS unavailable";
 
   cameraStatusList.innerHTML = "";
   const sourceHealth = Array.isArray(status.source_health) ? status.source_health : [];

@@ -21,7 +21,7 @@
 ################################################################################
 
 source-list:
-  list: v4l2:///dev/v4l/by-path/platform-3610000.usb-usb-0:1.2:1.0-video-index0
+  list: v4l2:///dev/v4l/by-path/platform-3610000.usb-usb-0:1.2:1.0-video-index0;rtsp://alpr:alpr@192.168.1.20/axis-media/media.amp
 
 analytics:
   enable: 1
@@ -94,4 +94,5 @@ live-dashboard:
   endpoint: http://127.0.0.1:8080/api/live-event
   source-map:
     source_0: RF
+    source_1: LF
 

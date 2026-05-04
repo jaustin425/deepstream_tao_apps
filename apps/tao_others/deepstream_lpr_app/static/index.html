@@ -5,7 +5,7 @@
   <title>ALPR Live</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <link rel="stylesheet" href="/static/styles.css?v=20260420-live-refresh-2">
+  <link rel="stylesheet" href="/static/styles.css?v=20260504-gps-status-1">
 </head>
 <body>
 
@@ -15,6 +15,7 @@
       <div class="title">ALPR Live</div>
       <a class="topbar-link" href="/hotlists">Hotlists</a>
       <a class="topbar-link" href="/config">Camera Config</a>
+      <a class="topbar-link" href="/events">Event History</a>
     </div>
     <div class="banner-stack">
       <button id="audioArmBanner" class="audio-arm-banner">Tap To Enable Live Audio</button>
@@ -62,6 +63,13 @@
       <div id="networkAccessList" class="network-access-list"></div>
     </div>
     <div class="status-row">
+      <div class="status-section-label">GPS</div>
+      <div class="gps-status-wrap">
+        <span id="gpsStatusChip" class="gps-status-chip gps-status-disconnected">DISCONNECTED</span>
+        <span id="gpsStatusDetail" class="gps-status-detail">MiFi GPS unavailable</span>
+      </div>
+    </div>
+    <div class="status-row">
       <div class="status-section-label">Camera Status</div>
       <div id="cameraStatusList" class="camera-status-list"></div>
     </div>
@@ -87,6 +95,6 @@
   <img id="imageViewerImg" class="image-viewer-img" alt="ALPR read image">
 </div>
 
-<script src="/static/app.js?v=20260420-live-refresh-3"></script>
+<script src="/static/app.js?v=20260504-gps-status-1"></script>
 </body>
 </html>

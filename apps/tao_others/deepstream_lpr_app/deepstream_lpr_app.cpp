@@ -456,6 +456,16 @@ static std::string normalize_v4l2_camera_source(const std::string& source_path) 
   return device_path;
 }
 
+static bool is_uri_source(const std::string& source_path) {
+  return gst_uri_is_valid(source_path.c_str());
+}
+
+static bool is_live_uri_source(const std::string& source_path) {
+  return g_str_has_prefix(source_path.c_str(), "rtsp://") ||
+         g_str_has_prefix(source_path.c_str(), "rtsps://") ||
+         g_str_has_prefix(source_path.c_str(), "udp://");
+}
+
 static void apply_live_dashboard_config(const std::string& config_path) {
   try {
     YAML::Node root = YAML::LoadFile(config_path);
@@ -3643,6 +3653,46 @@ exit:
   gst_object_unref(sink_pad);
 }
 
+static void cb_uri_new_pad(GstElement *element, GstPad *pad, GstElement *data) {
+  GstCaps *new_pad_caps = NULL;
+  GstStructure *new_pad_struct = NULL;
+  const gchar *new_pad_type = NULL;
+  GstPadLinkReturn ret;
+
+  GstPad *sink_pad = gst_element_get_static_pad(GST_ELEMENT(data), "sink");
+  if (gst_pad_is_linked(sink_pad)) {
+    g_print("URI source already linked. Ignoring.\n");
+    goto exit;
+  }
+
+  new_pad_caps = gst_pad_get_current_caps(pad);
+  if (!new_pad_caps) {
+    new_pad_caps = gst_pad_query_caps(pad, NULL);
+  }
+  if (!new_pad_caps) {
+    g_print("URI source pad has no caps. Ignoring.\n");
+    goto exit;
+  }
+
+  new_pad_struct = gst_caps_get_structure(new_pad_caps, 0);
+  new_pad_type = gst_structure_get_name(new_pad_struct);
+  g_print("uri decodebin pad %s\n", new_pad_type);
+
+  if (g_str_has_prefix(new_pad_type, "video/")) {
+    ret = gst_pad_link(pad, sink_pad);
+    if (GST_PAD_LINK_FAILED(ret))
+      g_print("fail to link uri decodebin to downstream queue.\n");
+  } else {
+    g_print("%s output, not video stream\n", new_pad_type);
+  }
+
+exit:
+  if (new_pad_caps) {
+    gst_caps_unref(new_pad_caps);
+  }
+  gst_object_unref(sink_pad);
+}
+
 /* nvdsanalytics_src_pad_buffer_probe  will extract metadata received on
  * nvdsanalytics src pad and extract nvanalytics metadata etc. */
 static GstPadProbeReturn
@@ -3793,6 +3843,7 @@ int main(int argc, char *argv[]) {
        iterator = iterator->next, src_cnt++) {
     std::string source_path = static_cast<const char *>(iterator->data);
     bool is_camera_source = is_v4l2_camera_source(source_path);
+    bool is_generic_uri_source = !is_camera_source && is_uri_source(source_path);
 
     source_convert[src_cnt] = NULL;
     source_caps[src_cnt] = NULL;
@@ -3848,6 +3899,51 @@ int main(int argc, char *argv[]) {
       if (!prop.integrated) {
         g_object_set(G_OBJECT(decoder[src_cnt]), "nvbuf-memory-type", 3, NULL);
       }
+    } else if (is_generic_uri_source) {
+      if (is_live_uri_source(source_path)) {
+        has_live_source = true;
+      }
+
+      g_snprintf(ele_name, 64, "uri_decode_%d", src_cnt);
+      source[src_cnt] = gst_element_factory_make("uridecodebin", ele_name);
+
+      g_snprintf(ele_name, 64, "uri_queue_%d", src_cnt);
+      parsequeue[src_cnt] = gst_element_factory_make("queue", ele_name);
+
+      g_snprintf(ele_name, 64, "uri_nvvidconv_%d", src_cnt);
+      decoder[src_cnt] = gst_element_factory_make("nvvideoconvert", ele_name);
+
+      g_snprintf(ele_name, 64, "uri_nvmm_caps_%d", src_cnt);
+      source_nvmm_caps[src_cnt] = gst_element_factory_make("capsfilter", ele_name);
+
+      if (!source[src_cnt] || !parsequeue[src_cnt] || !decoder[src_cnt] ||
+          !source_nvmm_caps[src_cnt]) {
+        g_printerr("One URI source element could not be created. Exiting.\n");
+        return -1;
+      }
+
+      gst_bin_add_many(GST_BIN(pipeline), source[src_cnt], parsequeue[src_cnt],
+                       decoder[src_cnt], source_nvmm_caps[src_cnt], NULL);
+
+      GstCaps *uri_nvmm_caps =
+          gst_caps_from_string("video/x-raw(memory:NVMM),format=NV12");
+      g_object_set(G_OBJECT(source_nvmm_caps[src_cnt]), "caps", uri_nvmm_caps,
+                   NULL);
+      gst_caps_unref(uri_nvmm_caps);
+
+      g_object_set(G_OBJECT(source[src_cnt]), "uri", source_path.c_str(), NULL);
+      g_signal_connect(source[src_cnt], "pad-added", G_CALLBACK(cb_uri_new_pad),
+                       parsequeue[src_cnt]);
+
+      if (!gst_element_link_many(parsequeue[src_cnt], decoder[src_cnt],
+                                 source_nvmm_caps[src_cnt], NULL)) {
+        g_printerr("URI source elements could not be linked. Exiting.\n");
+        return -1;
+      }
+
+      if (!prop.integrated) {
+        g_object_set(G_OBJECT(decoder[src_cnt]), "nvbuf-memory-type", 3, NULL);
+      }
     } else {
       /* Only h264 element stream with mp4 container is supported. */
       g_snprintf(ele_name, 64, "file_src_%d", src_cnt);
@@ -3892,8 +3988,9 @@ int main(int argc, char *argv[]) {
     }
 
     srcpad = gst_element_get_static_pad(
-        is_camera_source ? source_nvmm_caps[src_cnt] : decoder[src_cnt],
-        pad_name_src);
+      (is_camera_source || is_generic_uri_source) ? source_nvmm_caps[src_cnt]
+                            : decoder[src_cnt],
+      pad_name_src);
     if (!srcpad) {
       g_printerr("Source request src pad failed. Exiting.\n");
       return -1;
@@ -3912,7 +4009,7 @@ int main(int argc, char *argv[]) {
         g_printerr("Camera elements could not be linked. Exiting.\n");
         return -1;
       }
-    } else {
+    } else if (!is_generic_uri_source) {
       if (!gst_element_link_pads(source[src_cnt], "src", mp4demux[src_cnt],
                                  "sink")) {
         g_printerr("Elements could not be linked: 0. Exiting.\n");

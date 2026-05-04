@@ -40,9 +40,11 @@ struct EvidenceEvent {
 
     std::string full_frame_path;
     std::string plate_crop_path;
+    std::string vehicle_crop_path;
     std::string annotated_frame_path;
     std::string full_frame_sha256;
     std::string plate_crop_sha256;
+    std::string vehicle_crop_sha256;
     std::string annotated_frame_sha256;
 
     std::string model_version;

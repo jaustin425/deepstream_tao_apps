@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>ALPR Camera Config</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/static/config.css?v=20260419-focus-overlay-1">
+  <link rel="stylesheet" href="/static/config.css?v=20260504-camera-mgmt-3">
 </head>
 <body>
   <header class="topbar">
@@ -15,6 +15,7 @@
     <div class="topbar-actions">
       <a class="nav-link" href="/">Live Events</a>
       <a class="nav-link" href="/hotlists">Hotlists</a>
+      <a class="nav-link" href="/events">Event History</a>
     </div>
   </header>
 
@@ -84,7 +85,10 @@
       </section>
 
       <section class="status-card">
-        <div class="panel-title">Sources</div>
+        <div class="sources-header">
+          <div class="panel-title">Sources</div>
+          <button type="button" id="addCameraBtn" class="source-add-btn">+ Add Camera</button>
+        </div>
         <div id="sourceList" class="source-list"></div>
       </section>
 
@@ -100,6 +104,54 @@
     </aside>
   </main>
 
-  <script src="/static/config.js?v=20260419-focus-overlay-1"></script>
+  <!-- Add Camera Modal -->
+  <div id="addCameraModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="addCameraModalTitle">
+    <div class="modal-panel">
+      <div id="addCameraModalTitle" class="modal-title">Add Camera</div>
+      <div class="modal-body">
+        <label class="modal-label">
+          <span>Camera URI</span>
+          <input id="addCameraUri" class="modal-input" type="text" placeholder="rtsp://user:pass@192.168.1.10/stream" autocomplete="off">
+        </label>
+        <label class="modal-label">
+          <span>Camera Name <span class="modal-hint">(letters, digits, hyphens, underscores only)</span></span>
+          <input id="addCameraName" class="modal-input" type="text" placeholder="FRONT-LEFT" maxlength="64" autocomplete="off">
+        </label>
+        <div id="addCameraStatus" class="control-status"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="addCameraSubmit" type="button" class="control-apply">Add Camera</button>
+        <button id="addCameraCancel" type="button" class="modal-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rename Camera Modal -->
+  <div id="renameCameraModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="renameCameraModalTitle">
+    <div class="modal-panel">
+      <div id="renameCameraModalTitle" class="modal-title">Rename Camera</div>
+      <div class="modal-body">
+        <label class="modal-label">
+          <span>Camera Name <span class="modal-hint">(letters, digits, hyphens, underscores only)</span></span>
+          <input id="renameCameraName" class="modal-input" type="text" maxlength="64" autocomplete="off">
+        </label>
+        <div id="renameCameraStatus" class="control-status"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="renameCameraSubmit" type="button" class="control-apply">Save Name</button>
+        <button id="renameCameraCancel" type="button" class="modal-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config saved banner -->
+  <div id="configChangesBanner" class="config-changes-banner hidden">
+    Config saved — restart the ALPR pipeline to apply changes.
+    <button type="button" id="configChangesRestart" class="config-changes-restart">Restart Now</button>
+    <button type="button" id="configChangesDismiss" aria-label="Dismiss">&#x2715;</button>
+  </div>
+
+  <script src="/static/config.js?v=20260504-camera-mgmt-3"></script>
+
 </body>
 </html>

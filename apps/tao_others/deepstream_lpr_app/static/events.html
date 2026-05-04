@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ALPR Event History</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/events.css?v=20260504-events-1">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="eyebrow">SQLite Event Database</div>
+    <h1>Event History</h1>
+  </div>
+  <div class="topbar-actions">
+    <a class="nav-link" href="/">Live Events</a>
+    <a class="nav-link" href="/hotlists">Hotlists</a>
+    <a class="nav-link" href="/config">Camera Config</a>
+  </div>
+</header>
+
+<div class="db-status-bar" id="dbStatusBar">
+  <span id="dbRowCount">— rows</span>
+  <span class="sep">·</span>
+  <span id="dbLastEvent">last event —</span>
+  <span class="sep">·</span>
+  <span id="dbSize">— MB</span>
+  <span class="sep">·</span>
+  <span id="dbPath" class="db-path"></span>
+  <button id="selfTestBtn" class="selftest-btn" type="button">Run Self-Test</button>
+  <span id="selfTestResult" class="selftest-result hidden"></span>
+</div>
+
+<main class="layout">
+
+  <aside class="filter-panel">
+    <div class="filter-title">Filters</div>
+
+    <label class="filter-label">Plate
+      <input id="fPlate" class="filter-input" type="text" placeholder="e.g. ABC123" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="filter-check">
+      <input id="fPlatePrefix" type="checkbox"> Prefix match
+    </label>
+
+    <label class="filter-label">Make
+      <input id="fMake" class="filter-input" type="text" placeholder="e.g. Toyota" autocomplete="off">
+    </label>
+
+    <label class="filter-label">Type
+      <input id="fType" class="filter-input" type="text" placeholder="e.g. Sedan" autocomplete="off">
+    </label>
+
+    <label class="filter-label">Color
+      <input id="fColor" class="filter-input" type="text" placeholder="e.g. Black" autocomplete="off">
+    </label>
+
+    <label class="filter-label">Source
+      <select id="fSource" class="filter-input">
+        <option value="">All</option>
+        <option value="LF">LF — Left Front</option>
+        <option value="RF">RF — Right Front</option>
+        <option value="LR">LR — Left Rear</option>
+        <option value="RR">RR — Right Rear</option>
+      </select>
+    </label>
+
+    <label class="filter-label">Status
+      <select id="fStatus" class="filter-input">
+        <option value="">All</option>
+        <option value="LOCKED">Locked</option>
+        <option value="CONFIRMED">Confirmed</option>
+      </select>
+    </label>
+
+    <label class="filter-label">Alert
+      <select id="fAlert" class="filter-input">
+        <option value="">All</option>
+        <option value="true">Hotlist Alert</option>
+        <option value="hit">Any Hotlist Hit</option>
+        <option value="none">No Hit</option>
+      </select>
+    </label>
+
+    <label class="filter-label">Alert Type
+      <select id="fAlertType" class="filter-input">
+        <option value="">All</option>
+        <option value="SVS">SVS — Stolen Vehicle</option>
+        <option value="SLR">SLR — Stolen Plate</option>
+        <option value="SFR">SFR — Felony Vehicle</option>
+      </select>
+    </label>
+
+    <label class="filter-label">From (UTC)
+      <input id="fStart" class="filter-input" type="datetime-local">
+    </label>
+
+    <label class="filter-label">To (UTC)
+      <input id="fEnd" class="filter-input" type="datetime-local">
+    </label>
+
+    <label class="filter-label">Results per page
+      <select id="fLimit" class="filter-input">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="250">250</option>
+      </select>
+    </label>
+
+    <button id="searchBtn" class="search-btn" type="button">Search</button>
+    <button id="clearBtn" class="clear-btn" type="button">Clear</button>
+  </aside>
+
+  <section class="results-panel">
+    <div class="results-header">
+      <span id="resultsCount" class="results-count"></span>
+      <div class="pagination" id="pagination"></div>
+    </div>
+
+    <div id="errorMsg" class="error-msg hidden"></div>
+    <div id="loading" class="loading hidden">Searching…</div>
+
+    <div class="table-wrap">
+      <table id="resultsTable" class="results-table">
+        <thead>
+          <tr>
+            <th>Timestamp (UTC)</th>
+            <th>Plate</th>
+            <th>Conf</th>
+            <th>Src</th>
+            <th>Status</th>
+            <th>Make / Type / Color</th>
+            <th>Hotlist</th>
+            <th>GPS</th>
+            <th>Images</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody">
+        </tbody>
+      </table>
+      <div id="noResults" class="no-results hidden">No matching records.</div>
+    </div>
+
+    <div class="pagination pagination-bottom" id="paginationBottom"></div>
+  </section>
+
+</main>
+
+<div id="imageModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Image viewer">
+  <div class="modal-backdrop" id="modalBackdrop"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <span id="modalTitle" class="modal-title"></span>
+      <button id="modalClose" class="modal-close" type="button" aria-label="Close">✕</button>
+    </div>
+    <img id="modalImg" class="modal-img" src="" alt="Evidence image">
+    <div id="modalCaption" class="modal-caption"></div>
+  </div>
+</div>
+
+<script src="/static/events.js?v=20260504-events-1"></script>
+</body>
+</html>
