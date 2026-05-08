@@ -20,6 +20,13 @@
 # DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+alpr-runtime:
+  profile: patrol-fast
+  low-latency-rtsp: 1
+  rtsp-latency-ms: 80
+  rtsp-drop-on-latency: 1
+  latency-metrics: 1
+
 source-list:
   list: /root/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/cn.mp4
 
@@ -68,29 +75,33 @@ secondary-gie1:
   unique-id: 3
   process-mode: 2
 
-secondary-gie2:
-  #0:nvinfer, 1:nvinfeserver
-  plugin-type: 0
-  ##For car color classification
-  config-file-path: ../nvinfer/carcolor/sgie_carcolor_config.txt
-  unique-id: 4
-  process-mode: 2
-
-secondary-gie3:
-  #0:nvinfer, 1:nvinfeserver
-  plugin-type: 0
-  ##For vehicle type classification
-  config-file-path: ../nvinfer/vehicletypenet_tao/sgie_vehicletypenet_config.txt
-  unique-id: 5
-  process-mode: 2
-
-secondary-gie4:
-  #0:nvinfer, 1:nvinfeserver
-  plugin-type: 0
-  ##For vehicle make classification
-  config-file-path: ../nvinfer/vehiclemakenet_tao/sgie_vehiclemakenet_config.txt
-  unique-id: 6
-  process-mode: 2
+# Vehicle attribute classifiers are intentionally disabled for patrol mode.
+# They add SGIE latency and have not been accurate enough yet for field use.
+# Re-enable these sections later when make/type/color models are retuned.
+#
+# secondary-gie2:
+#   #0:nvinfer, 1:nvinfeserver
+#   plugin-type: 0
+#   ##For car color classification
+#   config-file-path: ../nvinfer/carcolor/sgie_carcolor_config.txt
+#   unique-id: 4
+#   process-mode: 2
+#
+# secondary-gie3:
+#   #0:nvinfer, 1:nvinfeserver
+#   plugin-type: 0
+#   ##For vehicle type classification
+#   config-file-path: ../nvinfer/vehicletypenet_tao/sgie_vehicletypenet_config.txt
+#   unique-id: 5
+#   process-mode: 2
+#
+# secondary-gie4:
+#   #0:nvinfer, 1:nvinfeserver
+#   plugin-type: 0
+#   ##For vehicle make classification
+#   config-file-path: ../nvinfer/vehiclemakenet_tao/sgie_vehiclemakenet_config.txt
+#   unique-id: 6
+#   process-mode: 2
 
 tracker:
   enable: 1
@@ -100,5 +111,3 @@ tracker:
   ll-lib-file: /opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
   ll-config-file: /opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml
   enable-batch-process: 1
-
-

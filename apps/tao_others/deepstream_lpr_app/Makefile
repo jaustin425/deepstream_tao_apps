@@ -43,7 +43,7 @@ OPENCV_PKG:= $(shell pkg-config --exists opencv4 && echo opencv4 || echo opencv)
 RTSP_SERVER_PKG:= $(shell pkg-config --exists gstreamer-rtsp-server-1.0 && echo gstreamer-rtsp-server-1.0)
 PKGS:= gstreamer-1.0 $(RTSP_SERVER_PKG) $(OPENCV_PKG)
 CFLAGS:=$(shell pkg-config --cflags $(PKGS))
-CFLAGS+=-g -O0 -Wall -Wno-unused-function \
+CFLAGS+=-g -O2 -Wall -Wno-unused-function \
        -pthread \
         -I/opt/nvidia/deepstream/deepstream/sources/includes \
         -I/usr/local/cuda/include \

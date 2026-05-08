@@ -44,6 +44,9 @@ ALPR_RUNTIME_STALE_SECONDS = 15
 ALPR_EVENT_STALE_SECONDS = 45
 ALPR_WATCHDOG_INTERVAL_SECONDS = max(2.0, float(os.getenv("ALPR_WATCHDOG_INTERVAL_SECONDS", "5")))
 ALPR_WATCHDOG_COOLDOWN_SECONDS = max(20.0, float(os.getenv("ALPR_WATCHDOG_COOLDOWN_SECONDS", "45")))
+TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+ALPR_LIVE_PERF_LOGGING = os.getenv("ALPR_LIVE_PERF_LOGGING", "").strip().lower() in TRUTHY_ENV_VALUES
+ALPR_LIVE_PERF_SLOW_MS = max(0.0, float(os.getenv("ALPR_LIVE_PERF_SLOW_MS", "40")))
 ACTIVE_CONFIG_ENV = "ALPR_ACTIVE_CONFIG_PATH"
 V4L2_CACHE_TTL_SECONDS = 2.0
 DIRECT_PREVIEW_CACHE_TTL_SECONDS = 0.5
@@ -185,6 +188,7 @@ class LiveEvent(BaseModel):
     annotated_frame_path: Optional[str] = None
     plate_crop_path: Optional[str] = None
     vehicle_crop_path: Optional[str] = None
+    ca_pattern: Optional[str] = None
     hotlist_hit: bool = False
     hotlist_entries: List[HotlistEntry] = Field(default_factory=list)
     hotlist_highest_label: Optional[str] = None
@@ -301,6 +305,13 @@ class PersistedPlateRead(BaseModel):
     hotlist_entries: List[HotlistEntry] = Field(default_factory=list)
     created_at_utc: Optional[str] = None
     updated_at_utc: Optional[str] = None
+    ca_pattern: Optional[str] = None
+    review_status: str = "unreviewed"
+    corrected_plate: Optional[str] = None
+    plate_state: Optional[str] = None
+    plate_type: Optional[str] = None
+    review_notes: Optional[str] = None
+    reviewed_at_utc: Optional[str] = None
 
 
 class PersistedPlateReadSearchResponse(BaseModel):
@@ -308,6 +319,21 @@ class PersistedPlateReadSearchResponse(BaseModel):
     limit: int
     offset: int
     items: List[PersistedPlateRead]
+
+
+class PlateReviewRequest(BaseModel):
+    review_status: Literal["correct", "incorrect"]
+    corrected_plate: Optional[str] = None
+    plate_state: Optional[Literal["CA", "unknown", "other"]] = None
+    plate_type: Optional[Literal["passenger", "commercial", "trailer", "motorcycle", "personalized"]] = None
+    review_notes: Optional[str] = None
+
+
+class DatasetExportRequest(BaseModel):
+    plate_state: Optional[str] = None
+    plate_type: Optional[str] = None
+    review_status: str = "correct"
+    limit: int = Field(default=1000, ge=1, le=50000)
 
 
 class HotlistResetRequest(BaseModel):
@@ -458,6 +484,10 @@ app.add_middleware(
 
 live_events: List[LiveEvent] = []
 clients: Set[WebSocket] = set()
+# Throttle CONFIRMED broadcasts to avoid flooding the UI during a vehicle pass.
+# Maps display_id -> monotonic timestamp of last broadcast for that entity.
+_confirmed_broadcast_times: Dict[str, float] = {}
+CONFIRMED_BROADCAST_MIN_INTERVAL = 2.0  # seconds between CONFIRMED WS messages per entity
 hotlist_by_plate: Dict[str, List[HotlistEntry]] = {}
 hotlist_by_runtime_plate: Dict[str, List[HotlistEntry]] = {}
 local_hotlist_entries: List[HotlistEntry] = []
@@ -546,6 +576,33 @@ def active_config_path() -> Optional[Path]:
     if not resolved.exists() or not resolved.is_file():
         return None
     return resolved
+
+
+def vehicle_attribute_classifiers_enabled(config_path: Optional[Path] = None) -> bool:
+    path = config_path or active_config_path()
+    if path is None:
+        return False
+
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if indent == 0 and stripped in {"secondary-gie2:", "secondary-gie3:", "secondary-gie4:"}:
+            return True
+    return False
+
+
+def clear_vehicle_attributes(event: LiveEvent) -> LiveEvent:
+    event.vehicle_make = None
+    event.vehicle_type = None
+    event.vehicle_color = None
+    return event
 
 
 def split_source_values(raw_value: str) -> List[str]:
@@ -1446,6 +1503,30 @@ def ensure_event_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_plate_reads_geo ON plate_reads(gps_fix_valid, gps_latitude, gps_longitude)"
         )
+        # Additive migration: add columns that may not exist in older DBs
+        for col_def in [
+            "ca_pattern TEXT",
+            "review_status TEXT NOT NULL DEFAULT 'unreviewed'",
+            "corrected_plate TEXT",
+            "plate_state TEXT",
+            "plate_type TEXT",
+            "review_notes TEXT",
+            "reviewed_at_utc TEXT",
+        ]:
+            col_name = col_def.split()[0]
+            try:
+                conn.execute(f"ALTER TABLE plate_reads ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_plate_reads_review_status ON plate_reads(review_status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_plate_reads_plate_state ON plate_reads(plate_state)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_plate_reads_ca_pattern ON plate_reads(ca_pattern)"
+        )
 
 
 def persist_plate_read(event: LiveEvent) -> None:
@@ -1466,8 +1547,8 @@ def persist_plate_read(event: LiveEvent) -> None:
                 gps_fix_valid, gps_latitude, gps_longitude, gps_altitude_m, gps_speed_knots, gps_timestamp_utc,
                 full_frame_path, annotated_frame_path, plate_crop_path, vehicle_crop_path,
                 hotlist_hit, hotlist_alert, hotlist_alert_reason, hotlist_type, hotlist_label, hotlist_priority,
-                hotlist_entries_json, raw_event_json, created_at_utc, updated_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                hotlist_entries_json, raw_event_json, ca_pattern, created_at_utc, updated_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(event_uuid) DO UPDATE SET
                 event_id = excluded.event_id,
                 case_id = excluded.case_id,
@@ -1501,6 +1582,7 @@ def persist_plate_read(event: LiveEvent) -> None:
                 hotlist_priority = excluded.hotlist_priority,
                 hotlist_entries_json = excluded.hotlist_entries_json,
                 raw_event_json = excluded.raw_event_json,
+                ca_pattern = excluded.ca_pattern,
                 updated_at_utc = excluded.updated_at_utc
             """,
             (
@@ -1538,6 +1620,7 @@ def persist_plate_read(event: LiveEvent) -> None:
                 event.hotlist_highest_priority,
                 hotlist_entries_json,
                 raw_event_json,
+                event.ca_pattern,
                 now_utc,
                 now_utc,
             ),
@@ -1618,6 +1701,13 @@ def row_to_persisted_plate_read(row: sqlite3.Row) -> PersistedPlateRead:
         hotlist_entries=parse_hotlist_entries_json(row["hotlist_entries_json"]),
         created_at_utc=row["created_at_utc"],
         updated_at_utc=row["updated_at_utc"],
+        ca_pattern=row["ca_pattern"] if "ca_pattern" in row.keys() else None,
+        review_status=row["review_status"] if "review_status" in row.keys() else "unreviewed",
+        corrected_plate=row["corrected_plate"] if "corrected_plate" in row.keys() else None,
+        plate_state=row["plate_state"] if "plate_state" in row.keys() else None,
+        plate_type=row["plate_type"] if "plate_type" in row.keys() else None,
+        review_notes=row["review_notes"] if "review_notes" in row.keys() else None,
+        reviewed_at_utc=row["reviewed_at_utc"] if "reviewed_at_utc" in row.keys() else None,
     )
 
 
@@ -1902,6 +1992,146 @@ def event_db_selftest() -> dict:
         "event_uuid": event_uuid,
         "steps": steps,
     }
+
+
+# ---------------------------------------------------------------------------
+# Review queue + dataset export helpers
+# ---------------------------------------------------------------------------
+
+def fetch_single_plate_read(event_uuid: str) -> Optional[PersistedPlateRead]:
+    """Return a single PersistedPlateRead by event_uuid, or None if not found."""
+    ensure_event_db()
+    with event_db_lock, sqlite3.connect(EVENT_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM plate_reads WHERE event_uuid = ?", (event_uuid,)
+        ).fetchone()
+    if row is None:
+        return None
+    return row_to_persisted_plate_read(row)
+
+
+def fetch_review_queue(limit: int = 20, source: Optional[str] = None) -> List[PersistedPlateRead]:
+    """Return unreviewed events ordered newest first."""
+    ensure_event_db()
+    params: list = []
+    where_clauses = ["review_status = 'unreviewed'"]
+    if source:
+        where_clauses.append("source = ?")
+        params.append(source)
+    where_sql = " AND ".join(where_clauses)
+    params.append(max(1, min(limit, 500)))
+    with event_db_lock, sqlite3.connect(EVENT_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"SELECT * FROM plate_reads WHERE {where_sql} ORDER BY timestamp_utc DESC LIMIT ?",
+            params,
+        ).fetchall()
+    return [row_to_persisted_plate_read(r) for r in rows]
+
+
+def apply_plate_review(event_uuid: str, req: "PlateReviewRequest") -> Optional[PersistedPlateRead]:
+    """Write review decision to DB and return updated record, or None if not found."""
+    ensure_event_db()
+    now_utc = utc_now_iso()
+    with event_db_lock, sqlite3.connect(EVENT_DB_PATH) as conn:
+        conn.execute(
+            """
+            UPDATE plate_reads SET
+                review_status = ?,
+                corrected_plate = ?,
+                plate_state = ?,
+                plate_type = ?,
+                review_notes = ?,
+                reviewed_at_utc = ?,
+                updated_at_utc = ?
+            WHERE event_uuid = ?
+            """,
+            (
+                req.review_status,
+                req.corrected_plate,
+                req.plate_state,
+                req.plate_type,
+                req.review_notes,
+                now_utc,
+                now_utc,
+                event_uuid,
+            ),
+        )
+        rows_affected = conn.execute("SELECT changes()").fetchone()[0]
+        if rows_affected == 0:
+            return None
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM plate_reads WHERE event_uuid = ?", (event_uuid,)
+        ).fetchone()
+    return row_to_persisted_plate_read(row) if row else None
+
+
+def export_dataset(req: "DatasetExportRequest") -> dict:
+    """Copy plate crops + write label/metadata for reviewed events matching filters."""
+    ensure_event_db()
+    params: list = []
+    where_clauses: list[str] = []
+    where_clauses.append("review_status = ?")
+    params.append(req.review_status)
+    if req.plate_state:
+        where_clauses.append("plate_state = ?")
+        params.append(req.plate_state)
+    if req.plate_type:
+        where_clauses.append("plate_type = ?")
+        params.append(req.plate_type)
+    where_sql = " AND ".join(where_clauses)
+    params.append(req.limit)
+
+    with event_db_lock, sqlite3.connect(EVENT_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"SELECT * FROM plate_reads WHERE {where_sql} ORDER BY timestamp_utc ASC LIMIT ?",
+            params,
+        ).fetchall()
+
+    output_dir = EVIDENCE_ROOT / "dataset"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    exported = 0
+    skipped = 0
+    for row in rows:
+        rec = row_to_persisted_plate_read(row)
+        dest_dir = output_dir / rec.event_uuid
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        # Copy plate crop
+        if rec.plate_crop_path:
+            src = Path(rec.plate_crop_path)
+            if src.exists():
+                import shutil
+                shutil.copy2(src, dest_dir / "plate_crop.jpg")
+            else:
+                skipped += 1
+                continue
+        else:
+            skipped += 1
+            continue
+        # Write label
+        plate_text = rec.corrected_plate or rec.plate or ""
+        (dest_dir / "label.txt").write_text(plate_text + "\n")
+        # Write metadata
+        meta = {
+            "event_uuid": rec.event_uuid,
+            "plate": rec.plate,
+            "corrected_plate": rec.corrected_plate,
+            "plate_state": rec.plate_state,
+            "plate_type": rec.plate_type,
+            "ca_pattern": rec.ca_pattern,
+            "confidence": rec.confidence,
+            "timestamp_utc": rec.timestamp_utc,
+            "source": rec.source,
+            "review_status": rec.review_status,
+            "review_notes": rec.review_notes,
+        }
+        (dest_dir / "metadata.json").write_text(json.dumps(meta, indent=2))
+        exported += 1
+
+    return {"exported": exported, "skipped": skipped, "output_dir": str(output_dir)}
 
 
 def runtime_item_is_fresh(runtime_item: dict, max_age_seconds: int = ALPR_RUNTIME_STALE_SECONDS) -> bool:
@@ -2421,8 +2651,9 @@ def event_sort_value(event: LiveEvent) -> tuple:
 
 def merge_live_event(existing: Optional[LiveEvent], incoming: LiveEvent) -> LiveEvent:
     incoming.display_id = live_display_id(incoming)
+    attributes_enabled = vehicle_attribute_classifiers_enabled()
     if existing is None:
-        return incoming
+        return incoming if attributes_enabled else clear_vehicle_attributes(incoming)
 
     best = incoming if event_sort_value(incoming) >= event_sort_value(existing) else existing
     merged = best.model_copy(deep=True)
@@ -2436,14 +2667,17 @@ def merge_live_event(existing: Optional[LiveEvent], incoming: LiveEvent) -> Live
         merged.plate_crop_path = incoming.plate_crop_path or existing.plate_crop_path
     if not merged.vehicle_crop_path:
         merged.vehicle_crop_path = incoming.vehicle_crop_path or existing.vehicle_crop_path
-    if not merged.vehicle_make:
-        merged.vehicle_make = incoming.vehicle_make or existing.vehicle_make
-    if not merged.vehicle_type:
-        merged.vehicle_type = incoming.vehicle_type or existing.vehicle_type
-    if not merged.vehicle_color:
-        merged.vehicle_color = incoming.vehicle_color or existing.vehicle_color
-    if not merged.vehicle_color and (merged.vehicle_make or merged.vehicle_type):
-        merged.vehicle_color = "Unknown"
+    if attributes_enabled:
+        if not merged.vehicle_make:
+            merged.vehicle_make = incoming.vehicle_make or existing.vehicle_make
+        if not merged.vehicle_type:
+            merged.vehicle_type = incoming.vehicle_type or existing.vehicle_type
+        if not merged.vehicle_color:
+            merged.vehicle_color = incoming.vehicle_color or existing.vehicle_color
+        if not merged.vehicle_color and (merged.vehicle_make or merged.vehicle_type):
+            merged.vehicle_color = "Unknown"
+    else:
+        clear_vehicle_attributes(merged)
     if not merged.gps_fix_valid:
         preferred = incoming if incoming.gps_fix_valid else existing
         if preferred.gps_fix_valid:
@@ -2933,6 +3167,15 @@ def log_watchdog(message: str) -> None:
     print(f"[{utc_now_iso()}] {message}", flush=True)
 
 
+def log_live_perf(stage: str, elapsed_ms: float, **fields: object) -> None:
+    if not ALPR_LIVE_PERF_LOGGING or elapsed_ms < ALPR_LIVE_PERF_SLOW_MS:
+        return
+
+    details = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    suffix = f" {details}" if details else ""
+    log_watchdog(f"[LIVE_PERF] stage={stage} elapsed_ms={elapsed_ms:.2f}{suffix}")
+
+
 def remove_pid_file(path: Path) -> None:
     try:
         path.unlink()
@@ -3201,7 +3444,8 @@ def effective_alpr_process_alive(alpr_pid: Optional[int], runtime_status: dict) 
     return runtime_fresh
 
 
-async def broadcast_event(event: LiveEvent, audio_cue: Optional[str] = None) -> None:
+async def broadcast_event(event: LiveEvent, audio_cue: Optional[str] = None) -> dict:
+    started_at = time.monotonic()
     dead_clients: List[WebSocket] = []
     payload = event.model_dump()
     if audio_cue:
@@ -3215,6 +3459,15 @@ async def broadcast_event(event: LiveEvent, audio_cue: Optional[str] = None) -> 
 
     for websocket in dead_clients:
         clients.discard(websocket)
+
+    elapsed_ms = (time.monotonic() - started_at) * 1000.0
+    stats = {
+        "elapsed_ms": elapsed_ms,
+        "client_count": len(clients),
+        "dead_client_count": len(dead_clients),
+    }
+    log_live_perf("broadcast", elapsed_ms, clients=len(clients), dead_clients=len(dead_clients))
+    return stats
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -3257,6 +3510,14 @@ async def events_page() -> str:
     if events_path.exists():
         return events_path.read_text(encoding="utf-8")
     raise HTTPException(status_code=404, detail="events page not found")
+
+
+@app.get("/review", response_class=HTMLResponse)
+async def review_page() -> str:
+    review_path = STATIC_ROOT / "review.html"
+    if review_path.exists():
+        return review_path.read_text(encoding="utf-8")
+    raise HTTPException(status_code=404, detail="review page not found")
 
 
 @app.get("/api/status", response_model=StatusResponse)
@@ -3770,8 +4031,36 @@ async def backfill_events(case_id: Optional[str] = None, limit_cases: int = 0) -
     return result
 
 
+@app.get("/api/events/{event_uuid}", response_model=PersistedPlateRead)
+async def get_single_event(event_uuid: str) -> PersistedPlateRead:
+    rec = await asyncio.to_thread(fetch_single_plate_read, event_uuid)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return rec
+
+
+@app.patch("/api/events/{event_uuid}/review", response_model=PersistedPlateRead)
+async def review_event(event_uuid: str, req: PlateReviewRequest) -> PersistedPlateRead:
+    rec = await asyncio.to_thread(apply_plate_review, event_uuid, req)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return rec
+
+
+@app.get("/api/review/queue", response_model=List[PersistedPlateRead])
+async def review_queue(limit: int = 20, source: Optional[str] = None) -> List[PersistedPlateRead]:
+    safe_limit = max(1, min(limit, 500))
+    return await asyncio.to_thread(fetch_review_queue, safe_limit, source)
+
+
+@app.post("/api/dataset/export")
+async def dataset_export(req: DatasetExportRequest) -> dict:
+    return await asyncio.to_thread(export_dataset, req)
+
+
 @app.post("/api/live-event", response_model=LiveEvent)
 async def post_live_event(event: LiveEvent) -> LiveEvent:
+    request_started_at = time.monotonic()
     # Stamp GPS from MiFi if the incoming event has no fix
     if not event.gps_fix_valid and latest_gps_fix:
         event.gps_fix_valid = latest_gps_fix.get("gps_fix_valid", False)
@@ -3801,12 +4090,41 @@ async def post_live_event(event: LiveEvent) -> LiveEvent:
     event.audio_cue = audio_cue
     upsert_live_event(event)
 
+    persist_elapsed_ms = None
     try:
+        persist_started_at = time.monotonic()
         await asyncio.to_thread(persist_plate_read, event)
+        persist_elapsed_ms = (time.monotonic() - persist_started_at) * 1000.0
+        log_live_perf("persist_plate_read", persist_elapsed_ms, display_id=display_id, status=event.status)
     except Exception as exc:
         print(f"[WARN] failed to persist plate read to SQLite: {exc}")
 
-    await broadcast_event(event, audio_cue)
+    # Throttle CONFIRMED broadcasts: skip if we sent one for this entity recently.
+    # LOCKED always broadcasts (it is the final best read).
+    should_broadcast = True
+    if incoming_status == EventStatus.CONFIRMED:
+        now_mono = time.monotonic()
+        last_sent = _confirmed_broadcast_times.get(display_id, 0.0)
+        if now_mono - last_sent < CONFIRMED_BROADCAST_MIN_INTERVAL:
+            should_broadcast = False
+        else:
+            _confirmed_broadcast_times[display_id] = now_mono
+    else:
+        # LOCKED — clear throttle entry so future reads start fresh
+        _confirmed_broadcast_times.pop(display_id, None)
+
+    broadcast_stats = await broadcast_event(event, audio_cue) if should_broadcast else {"elapsed_ms": 0.0, "client_count": len(clients), "dead_client_count": 0}
+    total_elapsed_ms = (time.monotonic() - request_started_at) * 1000.0
+    log_live_perf(
+        "post_live_event",
+        total_elapsed_ms,
+        display_id=display_id,
+        status=event.status,
+        clients=broadcast_stats["client_count"],
+        dead_clients=broadcast_stats["dead_client_count"],
+        persist_ms=f"{persist_elapsed_ms:.2f}" if persist_elapsed_ms is not None else None,
+        broadcast_ms=f"{broadcast_stats['elapsed_ms']:.2f}",
+    )
     return event
 
 

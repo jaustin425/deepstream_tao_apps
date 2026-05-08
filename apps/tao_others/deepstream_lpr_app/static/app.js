@@ -17,6 +17,8 @@ const pausedBanner = document.getElementById("pausedBanner");
 const pausedCount = document.getElementById("pausedCount");
 const alprAlive = document.getElementById("alprAlive");
 const alprStatusBox = document.getElementById("alprStatusBox");
+const statusDetails = document.getElementById("statusDetails");
+const statusToggleBtn = document.getElementById("statusToggleBtn");
 const networkAccessList = document.getElementById("networkAccessList");
 const cameraStatusList = document.getElementById("cameraStatusList");
 const gpsStatusChip = document.getElementById("gpsStatusChip");
@@ -35,6 +37,7 @@ let eventIds = new Set();
 let socket = null;
 let reconnectTimer = null;
 let liveEventsRefreshInFlight = false;
+let liveSocketConnected = false;
 let audioContext = null;
 let audioKeepaliveOscillator = null;
 let audioKeepaliveGain = null;
@@ -50,6 +53,11 @@ let viewerTouchStartY = null;
 let suppressViewerClick = false;
 let hotlistOnly = false;
 let acknowledgingPlates = new Set();
+let statusCollapsed = false;
+let renderScheduled = false;
+let pendingFollow = false;
+
+const mobileStatusMedia = window.matchMedia("(max-width: 460px)");
 
 const HOTLIST_PIN_MS = 60 * 1000;
 
@@ -85,6 +93,21 @@ function syncPauseBadge() {
 
 function syncAudioBanner() {
   audioArmBanner.classList.toggle("hidden", audioArmed || !audioEnabled);
+}
+
+function syncStatusCollapse() {
+  const mobile = mobileStatusMedia.matches;
+  statusToggleBtn.classList.toggle("hidden", !mobile);
+  const collapsed = mobile && statusCollapsed;
+  statusDetails.classList.toggle("hidden", collapsed);
+  statusToggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  statusToggleBtn.textContent = collapsed ? "Show" : "Collapse";
+  alprStatusBox.classList.toggle("status-collapsed", collapsed);
+}
+
+function setStatusCollapsed(nextCollapsed) {
+  statusCollapsed = !!nextCollapsed;
+  syncStatusCollapse();
 }
 
 function currentViewerItem() {
@@ -231,6 +254,10 @@ pauseBtn.onclick = () => {
     syncPauseBadge();
     render();
   }
+};
+
+statusToggleBtn.onclick = () => {
+  setStatusCollapsed(!statusCollapsed);
 };
 
 followBtn.onclick = () => {
@@ -728,12 +755,18 @@ function vehicleAttributesLabelText(event) {
 }
 
 function renderActiveAlerts() {
-  activeAlerts.innerHTML = "";
-
   const pinnedAlerts = events.filter((event) => isPinnedHotlist(event));
   activeAlertsSection.classList.toggle("hidden", pinnedAlerts.length === 0);
+
+  // Skip full rebuild when there are no pinned alerts.
+  if (pinnedAlerts.length === 0) {
+    activeAlerts.innerHTML = "";
+    return;
+  }
+
   activeAlertsSummary.textContent = pinnedAlerts.length === 1 ? "1 alert" : `${pinnedAlerts.length} alerts`;
 
+  activeAlerts.innerHTML = "";
   for (const event of pinnedAlerts) {
     activeAlerts.appendChild(createActiveAlertCard(event));
   }
@@ -924,27 +957,54 @@ function applyFilters(event) {
 
 function render() {
   renderActiveAlerts();
-  feed.innerHTML = "";
 
   const filtered = events.filter(applyFilters);
-  const ordered = filtered;
 
-  viewerItems = ordered
+  viewerItems = filtered
     .map((event) => {
       const imagePath = event.annotated_frame_path || event.full_frame_path || event.plate_crop_path;
-      if (!imagePath) {
-        return null;
-      }
-      return {
-        eventKey: eventKey(event),
-        url: buildImageUrl(imagePath),
-        alt: `${event.plate} ${event.status}`,
-      };
+      if (!imagePath) return null;
+      return { eventKey: eventKey(event), url: buildImageUrl(imagePath), alt: `${event.plate} ${event.status}` };
     })
     .filter(Boolean);
 
-  for (const event of ordered) {
-    feed.appendChild(createCard(event));
+  // Remove cards that are no longer in the filtered list.
+  const desiredKeySet = new Set(filtered.map(eventKey));
+  for (const el of Array.from(feed.children)) {
+    if (!desiredKeySet.has(el.dataset.evKey)) el.remove();
+  }
+
+  // Insert, update, and reorder only cards that actually changed.
+  for (let i = 0; i < filtered.length; i++) {
+    const event = filtered[i];
+    const key = eventKey(event);
+    const sig = eventDisplaySig(event);
+
+    // Find existing card by key (linear scan — max 200 items).
+    let el = null;
+    for (const child of feed.children) {
+      if (child.dataset.evKey === key) { el = child; break; }
+    }
+
+    if (el && el.dataset.evSig !== sig) {
+      // Content changed — replace in-place to avoid full feed rebuild.
+      const newCard = createCard(event);
+      newCard.dataset.evKey = key;
+      newCard.dataset.evSig = sig;
+      el.replaceWith(newCard);
+      el = newCard;
+    } else if (!el) {
+      // Brand-new card.
+      el = createCard(event);
+      el.dataset.evKey = key;
+      el.dataset.evSig = sig;
+    }
+    // else: card exists and signature matches — no DOM work needed.
+
+    // Ensure correct position without unnecessary moves.
+    if (feed.children[i] !== el) {
+      feed.insertBefore(el, feed.children[i] || null);
+    }
   }
 }
 
@@ -959,6 +1019,73 @@ function eventSignature(event) {
   return JSON.stringify(normalized);
 }
 
+function isLockedEvent(event) {
+  return String(event && event.status ? event.status : "").toUpperCase() === "LOCKED";
+}
+
+/* eventDisplaySig is like eventSignature but also captures time-based display
+ * state (hotlist pin countdown, suppression countdown) so that cards with live
+ * countdowns get re-rendered each second without forcing unrelated cards to
+ * rebuild. */
+function eventDisplaySig(event) {
+  const imagePath =
+    event.annotated_frame_path ||
+    event.full_frame_path ||
+    event.plate_crop_path ||
+    "";
+
+  // Only include fields that affect what the user can actually see on a card.
+  const normalized = {
+    plate: event.plate,
+    status: event.status,
+    source: event.source,
+    confidence: event.confidence,
+    timestamp_utc: event.timestamp_utc,
+    track_id: event.track_id,
+    track_id_valid: event.track_id_valid,
+    hotlist_hit: event.hotlist_hit,
+    hotlist_alert: event.hotlist_alert,
+    hotlist_highest_type: event.hotlist_highest_type,
+    hotlist_highest_label: event.hotlist_highest_label,
+    hotlist_alert_reason: event.hotlist_alert_reason,
+    vehicle_make: event.vehicle_make,
+    vehicle_type: event.vehicle_type,
+    vehicle_color: event.vehicle_color,
+    gps_fix_valid: event.gps_fix_valid,
+    gps_latitude: event.gps_latitude,
+    gps_longitude: event.gps_longitude,
+    gps_altitude_m: event.gps_altitude_m,
+    imagePath,
+  };
+
+  if (event.hotlist_alert && isPinnedHotlist(event)) {
+    normalized._countdown_s = pinnedSecondsRemaining(event);
+  }
+  if (event.hotlist_hit && suppressionSecondsRemaining(event) > 0) {
+    normalized._suppression_s = suppressionSecondsRemaining(event);
+  }
+
+  return JSON.stringify(normalized);
+}
+
+/* scheduleRender() debounces render calls so that rapid-fire WebSocket events
+ * (e.g. CANDIDATE → LOCKED updates for the same plate arriving milliseconds
+ * apart) collapse into a single animation frame, eliminating the "cycling
+ * through multiple frames" glitch. */
+function scheduleRender(follow = false) {
+  if (follow) pendingFollow = true;
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => {
+    renderScheduled = false;
+    render();
+    if (pendingFollow && followNew) {
+      pendingFollow = false;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  });
+}
+
 function addEvent(event, options = {}) {
   const playAudio = options.playAudio !== false;
   const renderNow = options.renderNow !== false;
@@ -966,18 +1093,47 @@ function addEvent(event, options = {}) {
   const key = eventKey(event);
   const existingIndex = events.findIndex((item) => eventKey(item) === key);
   const previousEvent = existingIndex >= 0 ? events[existingIndex] : null;
+  const incomingLocked = isLockedEvent(event);
+  const isUpdate = previousEvent !== null;
+  const wasLocked = previousEvent ? isLockedEvent(previousEvent) : false;
 
   if (previousEvent && eventSignature(previousEvent) === eventSignature(event)) {
     return false;
   }
 
-  applyEventRuntimeState(event, true);
-  if (existingIndex >= 0) {
-    events.splice(existingIndex, 1);
+  applyEventRuntimeState(event, !isUpdate);
+
+  // Determine whether this event should move to the top of the feed.
+  // Only move to top when: brand new entry, OR transitioning from CONFIRMED→LOCKED.
+  // Pure CONFIRMED→CONFIRMED updates stay in place to prevent card list churn.
+  const moveToTop = !isUpdate || (incomingLocked && !wasLocked);
+
+  // When updating a CONFIRMED card in-place (not yet LOCKED), preserve the
+  // currently-displayed image paths so the browser doesn't fetch a new image
+  // for every intermediate confidence update.  Only swap images once the
+  // event reaches LOCKED status (which carries the best annotated frame).
+  if (isUpdate && !incomingLocked && !wasLocked && previousEvent) {
+    const prevImg = previousEvent.annotated_frame_path || previousEvent.full_frame_path || previousEvent.plate_crop_path;
+    if (prevImg) {
+      event = Object.assign({}, event, {
+        annotated_frame_path: previousEvent.annotated_frame_path,
+        full_frame_path: previousEvent.full_frame_path,
+        plate_crop_path: previousEvent.plate_crop_path,
+      });
+    }
   }
 
-  eventIds.add(key);
-  events.unshift(event);
+  if (moveToTop) {
+    if (existingIndex >= 0) {
+      events.splice(existingIndex, 1);
+    }
+    eventIds.add(key);
+    events.unshift(event);
+  } else {
+    // Update in-place — no positional change, no scroll trigger.
+    events[existingIndex] = event;
+  }
+
   if (events.length > 200) {
     const removed = events.pop();
     if (removed) {
@@ -999,10 +1155,8 @@ function addEvent(event, options = {}) {
   }
 
   if (renderNow) {
-    render();
-  }
-  if (followNow && followNew) {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Only trigger auto-scroll when the card actually moved to the top.
+    scheduleRender(followNow && followNew && moveToTop);
   }
 
   return true;
@@ -1023,9 +1177,11 @@ function connectWS() {
   if (!liveFeedHealthy) {
     setOfflineBanner(true, "Live feed connecting...");
   }
+  liveSocketConnected = false;
   socket = new WebSocket(`${protocol}://${location.host}/ws/live`);
 
   socket.onopen = () => {
+    liveSocketConnected = true;
     markLiveFeedHealthy();
   };
 
@@ -1041,6 +1197,7 @@ function connectWS() {
   };
 
   socket.onclose = () => {
+    liveSocketConnected = false;
     if (!liveFeedHealthy) {
       markLiveFeedProblem("Live feed offline. Reconnecting...");
     }
@@ -1073,6 +1230,10 @@ function loadInitialEvents() {
 }
 
 function refreshLiveEvents() {
+  if (liveSocketConnected) {
+    return;
+  }
+
   if (liveEventsRefreshInFlight) {
     return;
   }
@@ -1117,12 +1278,18 @@ connectWS();
 loadInitialEvents();
 refreshStatus();
 refreshLiveEvents();
+setStatusCollapsed(mobileStatusMedia.matches);
+mobileStatusMedia.addEventListener("change", (event) => {
+  setStatusCollapsed(event.matches);
+});
 window.setInterval(refreshStatus, 5000);
 window.setInterval(refreshLiveEvents, 3000);
 syncPauseBadge();
 syncAudioBanner();
 
 searchInput.oninput = render;
-sourceFilter.onchange = render;
-statusFilter.onchange = render;
-window.setInterval(render, 1000);
+sourceFilter.onchange = scheduleRender;
+statusFilter.onchange = scheduleRender;
+// Periodic render only for live countdowns (hotlist pin timer etc.).
+// Use scheduleRender so it coalesces with any in-flight WS-triggered render.
+window.setInterval(() => { scheduleRender(false); }, 1000);

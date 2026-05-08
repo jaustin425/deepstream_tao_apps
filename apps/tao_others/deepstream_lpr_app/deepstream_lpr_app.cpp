@@ -78,9 +78,9 @@
 #define CAMERA_SOURCE_WIDTH 960
 #define CAMERA_SOURCE_HEIGHT 600
 
-/* Muxer batch formation timeout, for e.g. 40 millisec. Should ideally be set
- * based on the fastest source's framerate. */
-#define MUXER_BATCH_TIMEOUT_USEC 4000000
+/* Muxer batch formation timeout. Keep this near one 30 FPS frame interval so a
+ * live patrol read does not wait behind stale frames while forming batches. */
+#define MUXER_BATCH_TIMEOUT_USEC 40000
 
 /* Check for parsing error. */
 #define RETURN_ON_PARSER_ERROR(parse_expr)                                     \
@@ -109,6 +109,12 @@ struct PlateTrack {
     bool reported = false;
   bool debug_reported = false;
     int last_seen_frame = 0;
+    int first_seen_frame = -1;
+    gint64 first_seen_time_us = 0;
+    int first_readable_frame = -1;
+    gint64 first_readable_time_us = 0;
+    int first_confirmed_frame = -1;
+    gint64 first_confirmed_time_us = 0;
     int stable_frames = 0;
     std::string last_best;
 
@@ -142,6 +148,8 @@ struct PlateConfidenceResult {
     int separation_points = 0;
   int bonus_points = 0;
     int penalty_points = 0;
+    int ca_pattern_points = 0;
+    std::string ca_pattern_name;  // best matching CA pattern label
 };
 
 struct VehicleAttributes {
@@ -155,6 +163,16 @@ struct RecentPlateAttributes {
   std::string video_source;
   int frame_number = 0;
   int confidence = 0;
+};
+
+struct RecentPlateEvent {
+  std::string video_source;
+  std::string plate;
+  std::string event_type;
+  int confidence = 0;
+  int first_frame = 0;
+  int last_seen_frame = 0;
+  int last_emit_frame = 0;
 };
 
 struct ClassifierLabelResult {
@@ -195,12 +213,23 @@ struct VehicleCropQuality {
   float score = 0.0f;
 };
 
+struct AlprRuntimeConfig {
+  std::string profile = "patrol-fast";
+  bool low_latency_rtsp = true;
+  int rtsp_latency_ms = 80;
+  bool rtsp_drop_on_latency = true;
+  int rtsp_protocols = 4;  // GST_RTSP_LOWER_TRANS_TCP
+  bool latency_metrics = true;
+};
+
 static std::map<std::string, PlateTrack> plate_tracks;
 static std::map<std::string, RecentPlateAttributes> recent_plate_attributes;
+static std::vector<RecentPlateEvent> recent_plate_events;
 static std::string g_evidence_root = "evidence";
+static AlprRuntimeConfig g_runtime_config;
 static const char *kModelVersion = "alpr_ds_v1";
 
-static const int REJECT_THRESHOLD = 72;
+static const int REJECT_THRESHOLD = 60;
 static const int DEBUG_THRESHOLD_MIN = 60;
 static const int DEBUG_STABLE_FRAMES = 4;
 static const int LOCK_THRESHOLD = 82;
@@ -210,7 +239,11 @@ static const int TRACK_DECAY_FRAMES = 15;
 static const int TRACK_DROP_FRAMES = 40;
 static const int TRACK_EVENT_COOLDOWN_FRAMES = 120;
 static const int TRACK_EVENT_IMPROVEMENT_DELTA = 2;
+static const int TRACK_LOCK_IMPROVEMENT_DELTA = 8;
 static const int RECENT_PLATE_ATTRIBUTE_MAX_AGE_FRAMES = 1800;
+static const int SOURCE_PLATE_EVENT_SUPPRESS_FRAMES = 180;
+static const int SOURCE_PLATE_EVENT_MIN_REEMIT_FRAMES = 180;
+static const int SOURCE_PLATE_EVENT_IMPROVEMENT_DELTA = 12;
 
 static std::string preview_focus_state_for_plate(int confidence, bool readable) {
   if (confidence >= REJECT_THRESHOLD) {
@@ -411,6 +444,116 @@ static bool config_has_section(const std::string& config_path, const char* secti
   }
 }
 
+static bool yaml_bool_or_default(const YAML::Node& node, bool fallback) {
+  if (!node || node.IsNull()) {
+    return fallback;
+  }
+
+  try {
+    return node.as<bool>();
+  } catch (const std::exception&) {
+    try {
+      std::string value = to_lower_copy(trim_copy(node.as<std::string>()));
+      if (value == "1" || value == "true" || value == "yes" || value == "on") {
+        return true;
+      }
+      if (value == "0" || value == "false" || value == "no" || value == "off") {
+        return false;
+      }
+    } catch (const std::exception&) {
+    }
+  }
+
+  return fallback;
+}
+
+static int yaml_int_or_default(const YAML::Node& node, int fallback) {
+  if (!node || node.IsNull()) {
+    return fallback;
+  }
+
+  try {
+    return node.as<int>();
+  } catch (const std::exception&) {
+    return fallback;
+  }
+}
+
+static int parse_rtsp_protocols(const std::string& value, int fallback) {
+  std::string normalized = to_lower_copy(trim_copy(value));
+  if (normalized == "tcp") {
+    return 4;
+  }
+  if (normalized == "udp") {
+    return 1;
+  }
+  if (normalized == "udp-mcast" || normalized == "multicast") {
+    return 2;
+  }
+  if (normalized == "auto" || normalized == "any") {
+    return 0x7;
+  }
+  return fallback;
+}
+
+static AlprRuntimeConfig load_alpr_runtime_config(const std::string& config_path) {
+  AlprRuntimeConfig config;
+
+  try {
+    YAML::Node root = YAML::LoadFile(config_path);
+    YAML::Node runtime = root["alpr-runtime"];
+    if (!runtime || !runtime.IsMap()) {
+      runtime = root["runtime"];
+    }
+    if (!runtime || !runtime.IsMap()) {
+      return config;
+    }
+
+    if (runtime["profile"] && runtime["profile"].IsScalar()) {
+      config.profile = runtime["profile"].as<std::string>();
+    }
+
+    std::string normalized_profile = to_lower_copy(trim_copy(config.profile));
+    if (normalized_profile == "balanced" || normalized_profile == "review") {
+      config.low_latency_rtsp = false;
+      config.rtsp_latency_ms = 200;
+      config.rtsp_drop_on_latency = false;
+      config.rtsp_protocols = 4;
+    } else {
+      config.profile = config.profile.empty() ? "patrol-fast" : config.profile;
+      config.low_latency_rtsp = true;
+      config.rtsp_latency_ms = 80;
+      config.rtsp_drop_on_latency = true;
+      config.rtsp_protocols = 4;
+      config.latency_metrics = true;
+    }
+
+    config.low_latency_rtsp =
+      yaml_bool_or_default(runtime["low-latency-rtsp"], config.low_latency_rtsp);
+    config.rtsp_latency_ms =
+      yaml_int_or_default(runtime["rtsp-latency-ms"], config.rtsp_latency_ms);
+    config.rtsp_drop_on_latency =
+      yaml_bool_or_default(runtime["rtsp-drop-on-latency"],
+                           config.rtsp_drop_on_latency);
+    if (runtime["rtsp-transport"] && runtime["rtsp-transport"].IsScalar()) {
+      config.rtsp_protocols =
+        parse_rtsp_protocols(runtime["rtsp-transport"].as<std::string>(),
+                             config.rtsp_protocols);
+    }
+    config.latency_metrics =
+      yaml_bool_or_default(runtime["latency-metrics"], config.latency_metrics);
+  } catch (const std::exception& e) {
+    g_printerr("Failed to load alpr-runtime config from %s: %s\n",
+               config_path.c_str(), e.what());
+  }
+
+  if (config.rtsp_latency_ms < 0) {
+    config.rtsp_latency_ms = 0;
+  }
+
+  return config;
+}
+
 static bool link_element_chain(const std::vector<GstElement*>& elements) {
   if (elements.size() < 2) {
     return true;
@@ -464,6 +607,11 @@ static bool is_live_uri_source(const std::string& source_path) {
   return g_str_has_prefix(source_path.c_str(), "rtsp://") ||
          g_str_has_prefix(source_path.c_str(), "rtsps://") ||
          g_str_has_prefix(source_path.c_str(), "udp://");
+}
+
+static bool is_rtsp_uri_source(const std::string& source_path) {
+  return g_str_has_prefix(source_path.c_str(), "rtsp://") ||
+         g_str_has_prefix(source_path.c_str(), "rtsps://");
 }
 
 static void apply_live_dashboard_config(const std::string& config_path) {
@@ -621,6 +769,61 @@ static bool should_log_large_vehicle_make_debug(const std::string& plate) {
   }
 
   return normalize_plate(plate) == normalize_plate(std::string(filter));
+}
+
+static bool verbose_frame_logs_enabled() {
+  static const bool enabled = env_flag_enabled("ALPR_VERBOSE_FRAME_LOGS");
+  return enabled;
+}
+
+static bool debug_events_enabled() {
+  static const bool enabled = env_flag_enabled("ALPR_WRITE_DEBUG_EVENTS");
+  return enabled;
+}
+
+static bool latency_metrics_enabled() {
+  return g_runtime_config.latency_metrics ||
+         env_flag_enabled("ALPR_LATENCY_METRICS");
+}
+
+static void log_plate_latency_event(const char* event_type,
+                                    const std::string& video_source,
+                                    const std::string& plate,
+                                    const PlateTrack& track,
+                                    int current_frame,
+                                    gint64 current_time_us,
+                                    int confidence,
+                                    int best_votes,
+                                    int stable_frames) {
+  if (!latency_metrics_enabled()) {
+    return;
+  }
+
+  int frames_from_first_read = -1;
+  gint64 ms_from_first_read = -1;
+  if (track.first_seen_frame >= 0 && track.first_seen_time_us > 0) {
+    frames_from_first_read = current_frame - track.first_seen_frame;
+    ms_from_first_read = (current_time_us - track.first_seen_time_us) / 1000;
+  }
+
+  int frames_from_readable = -1;
+  gint64 ms_from_readable = -1;
+  if (track.first_readable_frame >= 0 && track.first_readable_time_us > 0) {
+    frames_from_readable = current_frame - track.first_readable_frame;
+    ms_from_readable = (current_time_us - track.first_readable_time_us) / 1000;
+  }
+
+  std::cout << "ALPR_LATENCY event=" << event_type
+            << " source=" << video_source
+            << " plate=" << plate
+            << " confidence=" << confidence
+            << " votes=" << best_votes
+            << " stable_frames=" << stable_frames
+            << " frames_from_first_read=" << frames_from_first_read
+            << " ms_from_first_read=" << ms_from_first_read
+            << " frames_from_readable=" << frames_from_readable
+            << " ms_from_readable=" << ms_from_readable
+            << std::endl;
 }
 
 static std::string format_probability(float value) {
@@ -2352,6 +2555,112 @@ enum class PlateCharExpectation {
   Digit,
 };
 
+// ---------------------------------------------------------------------------
+// California plate pattern matching
+// ---------------------------------------------------------------------------
+
+enum class CAPlatePattern {
+    // Standard passenger:  7LLL000  (digit, 3 letters, 3 digits)
+    Passenger,
+    // Commercial format A: LLL000A  (3 letters, 3 digits, 1 letter)
+    Commercial1,
+    // Commercial format B: 0L00000  (digit, letter, 5 digits)
+    Commercial2,
+    // Motorcycle:          00L000   (2 digits, letter, 3 digits)
+    Motorcycle,
+    // Trailer:             0LL000   (digit, 2 letters, 3 digits)
+    Trailer,
+    // Older 6-char:        LLL000   (3 letters, 3 digits)
+    SixChar,
+    Unknown
+};
+
+struct CAPatternFit {
+    CAPlatePattern pattern = CAPlatePattern::Unknown;
+    int fit_score = 0;   // 0..length  (one point per matching position)
+    std::string name;    // human-readable label
+};
+
+static PlateCharExpectation ca_pattern_char_class(CAPlatePattern p, size_t pos) {
+    switch (p) {
+        case CAPlatePattern::Passenger:
+            // 7LLL000  (pos 0 = digit, 1-3 = letter, 4-6 = digit)
+            if (pos == 0 || pos >= 4) return PlateCharExpectation::Digit;
+            return PlateCharExpectation::Letter;
+        case CAPlatePattern::Commercial1:
+            // LLL000A
+            if (pos < 3) return PlateCharExpectation::Letter;
+            if (pos < 6) return PlateCharExpectation::Digit;
+            return PlateCharExpectation::Letter;  // pos 6
+        case CAPlatePattern::Commercial2:
+            // 0L00000
+            if (pos == 0) return PlateCharExpectation::Digit;
+            if (pos == 1) return PlateCharExpectation::Letter;
+            return PlateCharExpectation::Digit;
+        case CAPlatePattern::Motorcycle:
+            // 00L000
+            if (pos < 2) return PlateCharExpectation::Digit;
+            if (pos == 2) return PlateCharExpectation::Letter;
+            return PlateCharExpectation::Digit;
+        case CAPlatePattern::Trailer:
+            // 0LL000
+            if (pos == 0) return PlateCharExpectation::Digit;
+            if (pos < 3) return PlateCharExpectation::Letter;
+            return PlateCharExpectation::Digit;
+        case CAPlatePattern::SixChar:
+            // LLL000
+            if (pos < 3) return PlateCharExpectation::Letter;
+            return PlateCharExpectation::Digit;
+        default:
+            return PlateCharExpectation::Any;
+    }
+}
+
+static const char* ca_pattern_label(CAPlatePattern p) {
+    switch (p) {
+        case CAPlatePattern::Passenger:  return "CA_PASSENGER";
+        case CAPlatePattern::Commercial1: return "CA_COMMERCIAL_1";
+        case CAPlatePattern::Commercial2: return "CA_COMMERCIAL_2";
+        case CAPlatePattern::Motorcycle: return "CA_MOTORCYCLE";
+        case CAPlatePattern::Trailer:    return "CA_TRAILER";
+        case CAPlatePattern::SixChar:    return "CA_6CHAR";
+        default:                         return "CA_UNKNOWN";
+    }
+}
+
+static CAPatternFit ca_best_pattern_fit(const std::string& text) {
+    if (text.empty()) return {};
+
+    // Candidate patterns and their expected lengths
+    struct Candidate { CAPlatePattern pat; size_t expected_len; };
+    static const Candidate candidates[] = {
+        { CAPlatePattern::Passenger,  7 },
+        { CAPlatePattern::Commercial1, 7 },
+        { CAPlatePattern::Commercial2, 7 },
+        { CAPlatePattern::Motorcycle, 6 },
+        { CAPlatePattern::Trailer,    6 },
+        { CAPlatePattern::SixChar,    6 },
+    };
+
+    CAPatternFit best;
+    for (const auto& cand : candidates) {
+        if (text.size() != cand.expected_len) continue;
+        int fit = 0;
+        for (size_t i = 0; i < text.size(); ++i) {
+            PlateCharExpectation ex = ca_pattern_char_class(cand.pat, i);
+            unsigned char c = static_cast<unsigned char>(text[i]);
+            if (ex == PlateCharExpectation::Digit && std::isdigit(c)) fit++;
+            else if (ex == PlateCharExpectation::Letter && std::isalpha(c)) fit++;
+        }
+        if (fit > best.fit_score) {
+            best.fit_score = fit;
+            best.pattern   = cand.pat;
+            best.name      = ca_pattern_label(cand.pat);
+        }
+    }
+    return best;
+}
+
 static PlateCharExpectation expected_plate_char_class(size_t pos, size_t len) {
   if (len == 7) {
     if (pos == 0 || pos >= 4) {
@@ -2453,12 +2762,30 @@ static bool is_confusable_pair(char a, char b) {
 }
 
 static int expected_class_score(char candidate, size_t pos, size_t len) {
-  PlateCharExpectation expectation = expected_plate_char_class(pos, len);
-  if (expectation == PlateCharExpectation::Digit) {
-    if (is_number_char(candidate)) return 2;
+  PlateCharExpectation generic_exp = expected_plate_char_class(pos, len);
+
+  // Build a CA-aware expectation: if the CA pattern and generic pattern agree,
+  // the signal is stronger (return 3 instead of 2).
+  // Use a placeholder string filled with the candidate at pos to probe the CA fit.
+  // We only check a single position here so we use ca_pattern_char_class directly.
+  // Try to determine best CA pattern for this length.
+  PlateCharExpectation ca_exp = PlateCharExpectation::Any;
+  // For the most common CA lengths check both Passenger/SixChar expectations
+  if (len == 7) {
+      // Try Passenger first (most common)
+      ca_exp = ca_pattern_char_class(CAPlatePattern::Passenger, pos);
+  } else if (len == 6) {
+      ca_exp = ca_pattern_char_class(CAPlatePattern::SixChar, pos);
+  }
+
+  // If both generic and CA agree on expectation, give bonus
+  bool ca_agrees = (ca_exp != PlateCharExpectation::Any && ca_exp == generic_exp);
+
+  if (generic_exp == PlateCharExpectation::Digit) {
+    if (is_number_char(candidate)) return ca_agrees ? 3 : 2;
     if (is_letter_char(candidate)) return -1;
-  } else if (expectation == PlateCharExpectation::Letter) {
-    if (is_letter_char(candidate)) return 2;
+  } else if (generic_exp == PlateCharExpectation::Letter) {
+    if (is_letter_char(candidate)) return ca_agrees ? 3 : 2;
     if (is_number_char(candidate)) return -1;
   }
   return 0;
@@ -2481,6 +2808,97 @@ static int expected_class_score(char candidate, size_t pos, size_t len) {
 
     mismatches += std::abs((int)a.size() - (int)b.size());
     return mismatches <= 1;
+}
+
+static int plate_event_rank(const std::string& event_type) {
+  if (event_type == "LOCKED") {
+    return 2;
+  }
+  if (event_type == "CONFIRMED") {
+    return 1;
+  }
+  return 0;
+}
+
+static bool same_recent_plate_event_family(const std::string& left,
+                                           const std::string& right) {
+  std::string normalized_left = normalize_plate(left);
+  std::string normalized_right = normalize_plate(right);
+  if (normalized_left.empty() || normalized_right.empty()) {
+    return false;
+  }
+  return normalized_left == normalized_right ||
+         same_plate_family_strict(normalized_left, normalized_right);
+}
+
+static bool should_emit_source_plate_event(const std::string& video_source,
+                                           const std::string& event_type,
+                                           const std::string& plate,
+                                           int confidence,
+                                           int current_frame) {
+  recent_plate_events.erase(
+      std::remove_if(recent_plate_events.begin(), recent_plate_events.end(),
+                     [current_frame](const RecentPlateEvent& event) {
+                       return current_frame - event.last_seen_frame >
+                              SOURCE_PLATE_EVENT_SUPPRESS_FRAMES;
+                     }),
+      recent_plate_events.end());
+
+  int current_rank = plate_event_rank(event_type);
+  for (RecentPlateEvent& event : recent_plate_events) {
+    if (event.video_source != video_source) {
+      continue;
+    }
+    if (!same_recent_plate_event_family(event.plate, plate)) {
+      continue;
+    }
+
+    event.last_seen_frame = current_frame;
+    int existing_rank = plate_event_rank(event.event_type);
+    bool status_upgrade = current_rank > existing_rank;
+    bool material_improvement =
+      confidence >= event.confidence + SOURCE_PLATE_EVENT_IMPROVEMENT_DELTA;
+    bool reemit_cooldown_elapsed =
+      current_frame - event.last_emit_frame >= SOURCE_PLATE_EVENT_MIN_REEMIT_FRAMES;
+
+    if (status_upgrade || (material_improvement && reemit_cooldown_elapsed)) {
+      event.plate = plate;
+      event.event_type = event_type;
+      event.confidence = std::max(event.confidence, confidence);
+      event.last_emit_frame = current_frame;
+      return true;
+    }
+
+    if (confidence > event.confidence) {
+      event.plate = plate;
+      event.confidence = confidence;
+    }
+    if (current_rank > existing_rank) {
+      event.event_type = event_type;
+    }
+
+    if (verbose_frame_logs_enabled()) {
+      std::cout << "SUPPRESSED duplicate " << event_type
+                << " plate=" << plate
+                << " source=" << video_source
+                << " existing_plate=" << event.plate
+                << " confidence=" << confidence
+                << " existing_confidence=" << event.confidence
+                << " age_frames=" << (current_frame - event.first_frame)
+                << std::endl;
+    }
+    return false;
+  }
+
+  recent_plate_events.push_back(RecentPlateEvent{
+      video_source,
+      plate,
+      event_type,
+      confidence,
+      current_frame,
+      current_frame,
+      current_frame});
+  return true;
 }
 
 static float rect_area(const NvOSD_RectParams& rect) {
@@ -2728,6 +3146,23 @@ static NvDsObjectMeta* resolve_vehicle_meta_for_plate(NvDsFrameMeta* frame_meta,
         r.score = r.vote_points + r.stability_points + r.dominance_points +
           r.bonus_points +
           r.separation_points + r.penalty_points;
+
+    // CA pattern bonus/penalty
+    {
+        CAPatternFit ca = ca_best_pattern_fit(consensus_plate);
+        r.ca_pattern_name = ca.name;
+        size_t len = consensus_plate.size();
+        if (len > 0) {
+            // fit_score out of len -> fraction [0..1]
+            double frac = static_cast<double>(ca.fit_score) / static_cast<double>(len);
+            if (frac >= 1.0) r.ca_pattern_points = 8;
+            else if (frac >= 0.857) r.ca_pattern_points = 5;  // 6/7
+            else if (frac >= 0.714) r.ca_pattern_points = 2;  // 5/7
+            else if (frac >= 0.5)   r.ca_pattern_points = -2;
+            else                    r.ca_pattern_points = -5;
+        }
+        r.score += r.ca_pattern_points;
+    }
 
     if (r.score < 0) r.score = 0;
     if (r.score > 100) r.score = 100;
@@ -3026,6 +3461,95 @@ typedef struct _perf_measure {
   guint count;
 } perf_measure;
 
+/* ── Large-vehicle license-plate zone probes ──────────────────────────────── *
+ * Problem: for tall/wide vehicles (box trucks, tractor-trailers, large vans), *
+ * the LPDNet secondary GIE receives the entire vehicle bounding box cropped   *
+ * and scaled to its 480×640 input.  The plate region shrinks to just a few    *
+ * pixels and becomes undetectable.                                             *
+ *                                                                              *
+ * Solution: a pre-LPD probe shrinks large-vehicle bounding boxes to their     *
+ * bottom plate zone before the secondary GIE crops them.  A post-LPR probe   *
+ * restores the original bounding boxes so attribute classifiers (make, type,  *
+ * color) still receive the full vehicle crop.                                  *
+ *                                                                              *
+ * Tuning knobs (frame is 960×544):                                             */
+#define LV_HEIGHT_THRESH 160.0f  /* px – vehicles taller than this are "large" */
+#define LV_WIDTH_THRESH  380.0f  /* px – OR wider than this are "large"         */
+#define LV_PLATE_FRAC      0.40f /* keep bottom 40 % of the box for LPD         */
+#define LV_PLATE_MIN_H    80.0f  /* never shrink the crop below this height      */
+
+/* misc_obj_info indices used to stash the original bounding box between probes.
+ * MAX_USER_FIELDS == 4, so valid indices are 0–3. */
+#define LV_MAGIC_IDX    0
+#define LV_ORIG_TOP_IDX 1
+#define LV_ORIG_H_IDX   2
+#define LV_MAGIC_VAL    ((gint64)0x4C564144LL)  /* "LVAD" = Large-Vehicle ADjusted */
+
+/* Pre-LPD probe: runs on queue4 src pad (between tracker and secondary_detector).
+ * For large vehicles, adjusts rect_params to the bottom plate zone. */
+static GstPadProbeReturn
+pre_lpd_large_vehicle_crop_probe(GstPad * /*pad*/, GstPadProbeInfo *info, gpointer /*user_data*/) {
+  GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+  NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta(buf);
+  if (!batch_meta) return GST_PAD_PROBE_OK;
+
+  for (NvDsMetaList *lf = batch_meta->frame_meta_list; lf; lf = lf->next) {
+    NvDsFrameMeta *fm = (NvDsFrameMeta *)lf->data;
+    for (NvDsMetaList *lo = fm->obj_meta_list; lo; lo = lo->next) {
+      NvDsObjectMeta *obj = (NvDsObjectMeta *)lo->data;
+      if (!obj) continue;
+      if (obj->unique_component_id != PRIMARY_DETECTOR_UID) continue;
+      if (obj->class_id != PGIE_CLASS_ID_VEHICLE) continue;
+
+      float h = obj->rect_params.height;
+      float w = obj->rect_params.width;
+
+      /* Only adjust bounding boxes that are large enough to hide the plate */
+      if (h < LV_HEIGHT_THRESH && w < LV_WIDTH_THRESH) continue;
+
+      /* Plate zone: bottom LV_PLATE_FRAC of the box, at least LV_PLATE_MIN_H */
+      float plate_h = std::max(h * LV_PLATE_FRAC, LV_PLATE_MIN_H);
+      if (plate_h >= h) continue;  /* already small enough — no change */
+
+      float new_top = obj->rect_params.top + (h - plate_h);
+
+      /* Stash originals so the restore probe can undo this adjustment */
+      obj->misc_obj_info[LV_MAGIC_IDX]    = LV_MAGIC_VAL;
+      obj->misc_obj_info[LV_ORIG_TOP_IDX] = (gint64)obj->rect_params.top;
+      obj->misc_obj_info[LV_ORIG_H_IDX]   = (gint64)obj->rect_params.height;
+
+      obj->rect_params.top    = new_top;
+      obj->rect_params.height = plate_h;
+    }
+  }
+  return GST_PAD_PROBE_OK;
+}
+
+/* Post-LPR restore probe: runs on queue6 src pad (after LPR, before attribute
+ * classifiers).  Restores the original full-vehicle bounding boxes so that
+ * make/type/color classifiers get the correct vehicle crop. */
+static GstPadProbeReturn
+post_lpr_restore_bbox_probe(GstPad * /*pad*/, GstPadProbeInfo *info, gpointer /*user_data*/) {
+  GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+  NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta(buf);
+  if (!batch_meta) return GST_PAD_PROBE_OK;
+
+  for (NvDsMetaList *lf = batch_meta->frame_meta_list; lf; lf = lf->next) {
+    NvDsFrameMeta *fm = (NvDsFrameMeta *)lf->data;
+    for (NvDsMetaList *lo = fm->obj_meta_list; lo; lo = lo->next) {
+      NvDsObjectMeta *obj = (NvDsObjectMeta *)lo->data;
+      if (!obj) continue;
+      if (obj->misc_obj_info[LV_MAGIC_IDX] != LV_MAGIC_VAL) continue;
+
+      /* Restore the original bounding box */
+      obj->rect_params.top    = (gfloat)obj->misc_obj_info[LV_ORIG_TOP_IDX];
+      obj->rect_params.height = (gfloat)obj->misc_obj_info[LV_ORIG_H_IDX];
+      obj->misc_obj_info[LV_MAGIC_IDX] = 0;  /* clear sentinel */
+    }
+  }
+  return GST_PAD_PROBE_OK;
+}
+
 /* osd_sink_pad_buffer_probe  will extract metadata received on OSD sink pad
  * and update params for drawing rectangle, object information etc. */
 static GstPadProbeReturn
@@ -3137,7 +3661,7 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
               "out_of_focus"});
           preview_detection = &frame_preview_detections.back();
           /* Print this info only when operating in secondary model. */
-          if (obj_meta->parent)
+          if (verbose_frame_logs_enabled() && obj_meta->parent)
             g_print("License plate found for parent object %p (type=%s)\n",
                     obj_meta->parent,
                     pgie_classes_str[obj_meta->parent->class_id]);
@@ -3186,7 +3710,13 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                 std::string plate_track_key =
                   build_plate_track_key(video_source, track_id_valid, track_id, obj_meta);
 
-                auto& track = plate_tracks[plate_track_key];
+                std::pair<std::map<std::string, PlateTrack>::iterator, bool> track_insert =
+                  plate_tracks.emplace(plate_track_key, PlateTrack());
+                auto& track = track_insert.first->second;
+                if (track_insert.second || track.first_seen_frame < 0) {
+                  track.first_seen_frame = frame_number;
+                  track.first_seen_time_us = now;
+                }
                 VehicleAttributeObservations attribute_observations =
                   extract_vehicle_attribute_observations(vehicle_meta);
 
@@ -3285,13 +3815,24 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                   continue;
                 }
 
-                std::cout << "TRACK UPDATE: " << consensus_plate
-                          << " score=" << conf.score
-                          << " reported=" << track.reported
-                          << std::endl;
+                if (track.first_readable_frame < 0) {
+                  track.first_readable_frame = frame_number;
+                  track.first_readable_time_us = now;
+                }
+
+                if (verbose_frame_logs_enabled()) {
+                  std::cout << "TRACK UPDATE: " << consensus_plate
+                            << " score=" << conf.score
+                            << " reported=" << track.reported
+                            << std::endl;
+                }
 
                 if (consensus_plate == track.last_best) {
                     track.stable_frames++;
+                } else if (same_plate_family_strict(consensus_plate, track.last_best)) {
+                    // Within 1-char noise tolerance — count as stable
+                    track.stable_frames++;
+                    track.last_best = consensus_plate;
                 } else {
                     track.stable_frames = 0;
                     track.last_best = consensus_plate;
@@ -3381,6 +3922,7 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                 }
 
                 bool qualifies_for_debug =
+                  debug_events_enabled() &&
                   best_votes >= 25 &&
                   track.stable_frames >= DEBUG_STABLE_FRAMES &&
                   is_valid_plate_text(consensus_plate) &&
@@ -3431,39 +3973,83 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                 }
 
                 if (!track.reported &&
-                  best_votes >= 25 &&
-                  track.stable_frames >= 5 &&
+                  best_votes >= 15 &&
+                  track.stable_frames >= 1 &&
                   is_valid_plate_text(consensus_plate) &&
                   looks_like_reasonable_us_plate(consensus_plate) &&
                   conf.score < REJECT_THRESHOLD) {
 
-                  std::cout << "REJECTED Plate: " << consensus_plate
-                            << " [confidence=" << conf.score << "]"
-                            << std::endl;
+                  if (verbose_frame_logs_enabled()) {
+                    std::cout << "REJECTED Plate: " << consensus_plate
+                              << " [confidence=" << conf.score << "]"
+                              << std::endl;
+                  }
                 }
 
-                if (best_votes >= 25 &&
-                  track.stable_frames >= 5 &&
+                if (best_votes >= 15 &&
+                  track.stable_frames >= 1 &&
                   is_valid_plate_text(consensus_plate) &&
                   looks_like_reasonable_us_plate(consensus_plate) &&
                   consensus_plate.find('?') == std::string::npos &&
                   conf.score >= REJECT_THRESHOLD) {
 
+                  // CONFIRMED fires only once per track (when first reported).
+                  // This creates the card on screen without churning on every
+                  // 2-point confidence improvement.
                   bool should_emit_confirmed =
+                    !track.reported &&
                     should_emit_track_event(consensus_plate, conf.score,
                                             track.last_confirmed_plate,
                                             track.last_confirmed_confidence,
                                             track.last_confirmed_frame,
                                             frame_number);
 
+                  // LOCKED requires a much larger confidence delta (TRACK_LOCK_IMPROVEMENT_DELTA)
+                  // so that only meaningful improvements trigger a re-lock event.
                   bool should_emit_locked =
                     should_lock_plate(consensus_plate, conf.score, track.stable_frames) &&
                     best_votes >= 35 &&
-                    should_emit_track_event(consensus_plate, conf.score,
-                                            track.last_locked_plate,
-                                            track.last_locked_confidence,
-                                            track.last_locked_frame,
-                                            frame_number);
+                    (track.last_locked_plate.empty() ||
+                     track.last_locked_plate != consensus_plate ||
+                     conf.score >= track.last_locked_confidence + TRACK_LOCK_IMPROVEMENT_DELTA ||
+                     (frame_number - track.last_locked_frame) >= TRACK_EVENT_COOLDOWN_FRAMES);
+
+                  if (should_emit_confirmed && should_emit_locked) {
+                    should_emit_confirmed = false;
+                  }
+
+                  if (!should_emit_confirmed && !should_emit_locked) {
+                    continue;
+                  }
+
+                  if (should_emit_confirmed &&
+                      !should_emit_source_plate_event(video_source,
+                                                      "CONFIRMED",
+                                                      consensus_plate,
+                                                      conf.score,
+                                                      frame_number)) {
+                    track.reported = true;
+                    track.last_confirmed_plate = consensus_plate;
+                    track.last_confirmed_confidence = conf.score;
+                    track.last_confirmed_frame = frame_number;
+                    should_emit_confirmed = false;
+                  }
+
+                  if (should_emit_locked &&
+                      !should_emit_source_plate_event(video_source,
+                                                      "LOCKED",
+                                                      consensus_plate,
+                                                      conf.score,
+                                                      frame_number)) {
+                    track.locked = true;
+                    track.locked_plate = consensus_plate;
+                    track.locked_confidence = conf.score;
+                    track.lock_frame = frame_number;
+                    track.last_locked_plate = consensus_plate;
+                    track.last_locked_confidence = conf.score;
+                    track.last_locked_frame = frame_number;
+                    should_emit_locked = false;
+                  }
 
                   if (!should_emit_confirmed && !should_emit_locked) {
                     continue;
@@ -3479,6 +4065,15 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                   int plate_height = static_cast<int>(obj_meta->rect_params.height);
 
                   if (should_emit_confirmed) {
+                    log_plate_latency_event("CONFIRMED",
+                                            video_source,
+                                            consensus_plate,
+                                            track,
+                                            frame_number,
+                                            now,
+                                            conf.score,
+                                            best_votes,
+                                            track.stable_frames);
                     bool confirmed_ok = write_evidence_event(
                       get_frame_mat(),
                       g_evidence_root,
@@ -3494,7 +4089,8 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                       track_id_valid,
                       track_id,
                       veh_left, veh_top, veh_width, veh_height,
-                      plate_left, plate_top, plate_width, plate_height);
+                      plate_left, plate_top, plate_width, plate_height,
+                      conf.ca_pattern_name);
 
                     std::cout << "CONFIRMED Plate: " << consensus_plate
                               << " [confidence=" << conf.score << "]";
@@ -3502,12 +4098,25 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                     std::cout << std::endl;
 
                     track.reported = true;
+                    if (track.first_confirmed_frame < 0) {
+                      track.first_confirmed_frame = frame_number;
+                      track.first_confirmed_time_us = now;
+                    }
                     track.last_confirmed_plate = consensus_plate;
                     track.last_confirmed_confidence = conf.score;
                     track.last_confirmed_frame = frame_number;
                   }
 
                   if (should_emit_locked) {
+                    log_plate_latency_event("LOCKED",
+                                            video_source,
+                                            consensus_plate,
+                                            track,
+                                            frame_number,
+                                            now,
+                                            conf.score,
+                                            best_votes,
+                                            track.stable_frames);
                     bool locked_ok = write_evidence_event(
                       get_frame_mat(),
                       g_evidence_root,
@@ -3523,7 +4132,8 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                       track_id_valid,
                       track_id,
                       veh_left, veh_top, veh_width, veh_height,
-                      plate_left, plate_top, plate_width, plate_height);
+                      plate_left, plate_top, plate_width, plate_height,
+                      conf.ca_pattern_name);
 
                     std::cout << "LOCKED Plate: " << consensus_plate
                               << " [confidence=" << conf.score << "]";
@@ -3583,9 +4193,11 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
     nvds_add_display_meta_to_frame(frame_meta, display_meta);
   }
 
-  g_print("Frame Number = %d Vehicle Count = %d Person Count = %d"
-          " License Plate Count = %d\n",
-          frame_number, vehicle_count, person_count, lp_count);
+  if (verbose_frame_logs_enabled()) {
+    g_print("Frame Number = %d Vehicle Count = %d Person Count = %d"
+            " License Plate Count = %d\n",
+            frame_number, vehicle_count, person_count, lp_count);
+  }
   frame_number++;
   total_plate_number += lp_count;
   return GST_PAD_PROBE_OK;
@@ -3693,6 +4305,102 @@ exit:
   gst_object_unref(sink_pad);
 }
 
+static void set_gobject_property_if_present(GObject *object,
+                                            const char *property_name,
+                                            int value) {
+  if (!object || !property_name) {
+    return;
+  }
+  if (!g_object_class_find_property(G_OBJECT_GET_CLASS(object), property_name)) {
+    return;
+  }
+  g_object_set(object, property_name, value, NULL);
+}
+
+static void set_gobject_bool_property_if_present(GObject *object,
+                                                 const char *property_name,
+                                                 gboolean value) {
+  if (!object || !property_name) {
+    return;
+  }
+  if (!g_object_class_find_property(G_OBJECT_GET_CLASS(object), property_name)) {
+    return;
+  }
+  g_object_set(object, property_name, value, NULL);
+}
+
+static void cb_uri_source_setup(GstElement * /*uridecodebin*/,
+                                GstElement *source,
+                                gpointer /*user_data*/) {
+  if (!source) {
+    return;
+  }
+
+  const gchar *factory_name = NULL;
+  GstElementFactory *factory = gst_element_get_factory(source);
+  if (factory) {
+    factory_name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory));
+  }
+
+  if (!factory_name || g_strcmp0(factory_name, "rtspsrc") != 0) {
+    return;
+  }
+
+  set_gobject_property_if_present(G_OBJECT(source), "latency",
+                                  g_runtime_config.rtsp_latency_ms);
+  set_gobject_bool_property_if_present(G_OBJECT(source), "drop-on-latency",
+                                       g_runtime_config.rtsp_drop_on_latency);
+  set_gobject_property_if_present(G_OBJECT(source), "protocols",
+                                  g_runtime_config.rtsp_protocols);
+  set_gobject_bool_property_if_present(G_OBJECT(source), "do-rtsp-keep-alive", TRUE);
+
+  g_print("configured uridecodebin rtspsrc latency=%d drop_on_latency=%d protocols=%d\n",
+          g_runtime_config.rtsp_latency_ms,
+          g_runtime_config.rtsp_drop_on_latency ? 1 : 0,
+          g_runtime_config.rtsp_protocols);
+}
+
+static void cb_rtsp_new_pad(GstElement *element, GstPad *pad, GstElement *data) {
+  GstCaps *new_pad_caps = NULL;
+  GstStructure *new_pad_struct = NULL;
+  const gchar *new_pad_type = NULL;
+  GstPadLinkReturn ret;
+
+  GstPad *sink_pad = gst_element_get_static_pad(GST_ELEMENT(data), "sink");
+  if (gst_pad_is_linked(sink_pad)) {
+    g_print("RTSP depayloader already linked. Ignoring.\n");
+    goto exit;
+  }
+
+  new_pad_caps = gst_pad_get_current_caps(pad);
+  if (!new_pad_caps) {
+    new_pad_caps = gst_pad_query_caps(pad, NULL);
+  }
+  if (!new_pad_caps) {
+    g_print("RTSP source pad has no caps. Ignoring.\n");
+    goto exit;
+  }
+
+  new_pad_struct = gst_caps_get_structure(new_pad_caps, 0);
+  new_pad_type = gst_structure_get_name(new_pad_struct);
+  g_print("rtspsrc pad %s\n", new_pad_type);
+
+  if (g_str_has_prefix(new_pad_type, "application/x-rtp")) {
+    ret = gst_pad_link(pad, sink_pad);
+    if (GST_PAD_LINK_FAILED(ret)) {
+      g_print("fail to link rtspsrc to rtph264depay.\n");
+    }
+  } else {
+    g_print("%s output, not RTP stream\n", new_pad_type);
+  }
+
+exit:
+  if (new_pad_caps) {
+    gst_caps_unref(new_pad_caps);
+  }
+  gst_object_unref(sink_pad);
+}
+
 /* nvdsanalytics_src_pad_buffer_probe  will extract metadata received on
  * nvdsanalytics src pad and extract nvanalytics metadata etc. */
 static GstPadProbeReturn
@@ -3733,8 +4441,8 @@ int main(int argc, char *argv[]) {
              *queue9 = NULL, *queue10 = NULL, *queue11 = NULL,
              *queue12 = NULL, *queue13 = NULL;
   GstElement *h264parser[128], *source[128], *decoder[128], *mp4demux[128],
-      *parsequeue[128], *source_convert[128], *source_caps[128],
-      *source_nvmm_caps[128];
+      *rtph264depay[128], *parsequeue[128], *source_convert[128],
+      *source_caps[128], *source_nvmm_caps[128];
   GstBus *bus = NULL;
   guint bus_watch_id;
   guint sigint_watch_id = 0;
@@ -3773,6 +4481,15 @@ int main(int argc, char *argv[]) {
   cudaGetDeviceProperties(&prop, current_device);
   set_case_review_index_generator(argv[0]);
   apply_live_dashboard_config(argv[1]);
+  g_runtime_config = load_alpr_runtime_config(argv[1]);
+  g_print("ALPR runtime profile=%s low_latency_rtsp=%d rtsp_latency_ms=%d "
+          "rtsp_drop_on_latency=%d rtsp_protocols=%d latency_metrics=%d\n",
+          g_runtime_config.profile.c_str(),
+          g_runtime_config.low_latency_rtsp ? 1 : 0,
+          g_runtime_config.rtsp_latency_ms,
+          g_runtime_config.rtsp_drop_on_latency ? 1 : 0,
+          g_runtime_config.rtsp_protocols,
+          g_runtime_config.latency_metrics ? 1 : 0);
 
   // For Chinese language supporting
   setlocale(LC_CTYPE, "");
@@ -3843,8 +4560,16 @@ int main(int argc, char *argv[]) {
        iterator = iterator->next, src_cnt++) {
     std::string source_path = static_cast<const char *>(iterator->data);
     bool is_camera_source = is_v4l2_camera_source(source_path);
+    bool is_low_latency_rtsp_source =
+      !is_camera_source && is_rtsp_uri_source(source_path) &&
+      g_runtime_config.low_latency_rtsp;
     bool is_generic_uri_source = !is_camera_source && is_uri_source(source_path);
 
+    h264parser[src_cnt] = NULL;
+    rtph264depay[src_cnt] = NULL;
+    mp4demux[src_cnt] = NULL;
+    decoder[src_cnt] = NULL;
+    parsequeue[src_cnt] = NULL;
     source_convert[src_cnt] = NULL;
     source_caps[src_cnt] = NULL;
     source_nvmm_caps[src_cnt] = NULL;
@@ -3899,6 +4624,67 @@ int main(int argc, char *argv[]) {
       if (!prop.integrated) {
         g_object_set(G_OBJECT(decoder[src_cnt]), "nvbuf-memory-type", 3, NULL);
       }
+    } else if (is_low_latency_rtsp_source) {
+      has_live_source = true;
+
+      g_snprintf(ele_name, 64, "rtsp_src_%d", src_cnt);
+      source[src_cnt] = gst_element_factory_make("rtspsrc", ele_name);
+
+      g_snprintf(ele_name, 64, "rtsp_h264depay_%d", src_cnt);
+      rtph264depay[src_cnt] = gst_element_factory_make("rtph264depay", ele_name);
+
+      g_snprintf(ele_name, 64, "rtsp_h264parse_%d", src_cnt);
+      h264parser[src_cnt] = gst_element_factory_make("h264parse", ele_name);
+
+      g_snprintf(ele_name, 64, "rtsp_parsequeue_%d", src_cnt);
+      parsequeue[src_cnt] = gst_element_factory_make("queue", ele_name);
+
+      g_snprintf(ele_name, 64, "rtsp_decoder_%d", src_cnt);
+      decoder[src_cnt] = gst_element_factory_make("nvv4l2decoder", ele_name);
+
+      g_snprintf(ele_name, 64, "rtsp_nvvidconv_%d", src_cnt);
+      source_convert[src_cnt] = gst_element_factory_make("nvvideoconvert", ele_name);
+
+      g_snprintf(ele_name, 64, "rtsp_nvmm_caps_%d", src_cnt);
+      source_nvmm_caps[src_cnt] = gst_element_factory_make("capsfilter", ele_name);
+
+      if (!source[src_cnt] || !rtph264depay[src_cnt] || !h264parser[src_cnt] ||
+          !parsequeue[src_cnt] || !decoder[src_cnt] || !source_convert[src_cnt] ||
+          !source_nvmm_caps[src_cnt]) {
+        g_printerr("One low-latency RTSP source element could not be created. Exiting.\n");
+        return -1;
+      }
+
+      gst_bin_add_many(GST_BIN(pipeline), source[src_cnt], rtph264depay[src_cnt],
+                       h264parser[src_cnt], parsequeue[src_cnt], decoder[src_cnt],
+                       source_convert[src_cnt], source_nvmm_caps[src_cnt], NULL);
+
+      GstCaps *rtsp_nvmm_caps =
+          gst_caps_from_string("video/x-raw(memory:NVMM),format=NV12");
+      g_object_set(G_OBJECT(source_nvmm_caps[src_cnt]), "caps", rtsp_nvmm_caps,
+                   NULL);
+      gst_caps_unref(rtsp_nvmm_caps);
+
+      g_object_set(G_OBJECT(source[src_cnt]), "location", source_path.c_str(),
+                   "latency", g_runtime_config.rtsp_latency_ms,
+                   "drop-on-latency", g_runtime_config.rtsp_drop_on_latency,
+                   "protocols", g_runtime_config.rtsp_protocols,
+                   "do-rtsp-keep-alive", TRUE, NULL);
+      g_signal_connect(source[src_cnt], "pad-added", G_CALLBACK(cb_rtsp_new_pad),
+                       rtph264depay[src_cnt]);
+
+      if (!gst_element_link_many(rtph264depay[src_cnt], h264parser[src_cnt],
+                                 parsequeue[src_cnt], decoder[src_cnt],
+                                 source_convert[src_cnt], source_nvmm_caps[src_cnt],
+                                 NULL)) {
+        g_printerr("Low-latency RTSP source elements could not be linked. Exiting.\n");
+        return -1;
+      }
+
+      if (!prop.integrated) {
+        g_object_set(G_OBJECT(decoder[src_cnt]), "nvbuf-memory-type", 3, NULL);
+        g_object_set(G_OBJECT(source_convert[src_cnt]), "nvbuf-memory-type", 3, NULL);
+      }
     } else if (is_generic_uri_source) {
       if (is_live_uri_source(source_path)) {
         has_live_source = true;
@@ -3925,6 +4711,18 @@ int main(int argc, char *argv[]) {
       gst_bin_add_many(GST_BIN(pipeline), source[src_cnt], parsequeue[src_cnt],
                        decoder[src_cnt], source_nvmm_caps[src_cnt], NULL);
 
+      /* Keep patrol display/read latency bounded on live IP cameras. This
+       * queue receives decoded raw video from uridecodebin, so dropping here
+       * avoids H.264 corruption while preventing a stale-frame backlog. */
+      if (is_live_uri_source(source_path)) {
+        g_object_set(G_OBJECT(parsequeue[src_cnt]),
+                     "max-size-buffers", 2,
+                     "max-size-bytes", 0,
+                     "max-size-time", 0,
+                     "leaky", 2,
+                     NULL);
+      }
+
       GstCaps *uri_nvmm_caps =
           gst_caps_from_string("video/x-raw(memory:NVMM),format=NV12");
       g_object_set(G_OBJECT(source_nvmm_caps[src_cnt]), "caps", uri_nvmm_caps,
@@ -3932,6 +4730,8 @@ int main(int argc, char *argv[]) {
       gst_caps_unref(uri_nvmm_caps);
 
       g_object_set(G_OBJECT(source[src_cnt]), "uri", source_path.c_str(), NULL);
+      g_signal_connect(source[src_cnt], "source-setup",
+                       G_CALLBACK(cb_uri_source_setup), NULL);
       g_signal_connect(source[src_cnt], "pad-added", G_CALLBACK(cb_uri_new_pad),
                        parsequeue[src_cnt]);
 
@@ -4264,6 +5064,34 @@ int main(int argc, char *argv[]) {
     gst_pad_add_probe(evidence_sink_pad, GST_PAD_PROBE_TYPE_BUFFER,
                       osd_sink_pad_buffer_probe, &perf_measure, NULL);
     gst_object_unref(evidence_sink_pad);
+  }
+
+  /* Pre-LPD large-vehicle crop probe: focus tall/wide vehicle bounding boxes on
+   * the bottom plate zone before LPDNet secondary GIE crops them for inference.
+   * queue4 src pad sits between the tracker and secondary_detector (LPDNet). */
+  GstPad *pre_lpd_pad = gst_element_get_static_pad(queue4, "src");
+  if (!pre_lpd_pad) {
+    g_print("Unable to get queue4 src pad for pre-LPD large-vehicle probe\n");
+  } else {
+    gst_pad_add_probe(pre_lpd_pad, GST_PAD_PROBE_TYPE_BUFFER,
+                      pre_lpd_large_vehicle_crop_probe, NULL, NULL);
+    gst_object_unref(pre_lpd_pad);
+    g_print("Pre-LPD large-vehicle crop probe attached (queue4 src)\n");
+  }
+
+  /* Post-LPR restore probe: restores original full-vehicle bounding boxes after
+   * LPDNet+LPRNet have run, so attribute classifiers (make/type/color) receive
+   * the correct full-vehicle crop.
+   * queue6 src pad sits between secondary_classifier (LPRNet) and the first
+   * attribute classifier. */
+  GstPad *post_lpr_pad = gst_element_get_static_pad(queue6, "src");
+  if (!post_lpr_pad) {
+    g_print("Unable to get queue6 src pad for post-LPR restore probe\n");
+  } else {
+    gst_pad_add_probe(post_lpr_pad, GST_PAD_PROBE_TYPE_BUFFER,
+                      post_lpr_restore_bbox_probe, NULL, NULL);
+    gst_object_unref(post_lpr_pad);
+    g_print("Post-LPR bbox restore probe attached (queue6 src)\n");
   }
 
   //osd_sink_pad = gst_element_get_static_pad(nvdsanalytics, "src");

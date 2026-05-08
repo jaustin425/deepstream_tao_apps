@@ -65,14 +65,15 @@ interval=0
 gie-unique-id=2
 cluster-mode=3
 output-blob-names=output_cov/Sigmoid:0;output_bbox/BiasAdd:0
-input-object-min-height=30
-input-object-min-width=40
+input-object-min-height=20
+input-object-min-width=30
+scaling-compute-hw=1
 process-mode=2
 operate-on-gie-id=1
 operate-on-class-ids=0
 
 [class-attrs-all]
-pre-cluster-threshold=0.3
+pre-cluster-threshold=0.1
 roi-top-offset=0
 roi-bottom-offset=0
 detected-min-w=0

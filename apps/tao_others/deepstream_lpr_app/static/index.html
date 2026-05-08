@@ -5,7 +5,7 @@
   <title>ALPR Live</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <link rel="stylesheet" href="/static/styles.css?v=20260504-gps-status-1">
+  <link rel="stylesheet" href="/static/styles.css?v=20260506-ui-throttle-7">
 </head>
 <body>
 
@@ -16,6 +16,7 @@
       <a class="topbar-link" href="/hotlists">Hotlists</a>
       <a class="topbar-link" href="/config">Camera Config</a>
       <a class="topbar-link" href="/events">Event History</a>
+      <a class="topbar-link" href="/review">Review</a>
     </div>
     <div class="banner-stack">
       <button id="audioArmBanner" class="audio-arm-banner">Tap To Enable Live Audio</button>
@@ -36,7 +37,7 @@
     </select>
 
     <select id="statusFilter">
-      <option value="">All</option>
+      <option value="" selected>All</option>
       <option value="LOCKED">Locked</option>
       <option value="CONFIRMED">Confirmed</option>
     </select>
@@ -51,27 +52,32 @@
 
 <main>
   <section id="alprStatusBox" class="status-strip">
-    <div class="status-strip-label">ALPR STATUS</div>
-    <div class="status-row">
-      <div class="status-section-label">System Status</div>
-      <div class="status-strip-main">
-        <span id="alprAlive" class="status-chip">Unknown</span>
+    <div class="status-strip-header">
+      <div class="status-strip-label">ALPR STATUS</div>
+      <button id="statusToggleBtn" class="status-toggle hidden" type="button" aria-expanded="true" aria-controls="statusDetails">Collapse</button>
+    </div>
+    <div id="statusDetails">
+      <div class="status-row">
+        <div class="status-section-label">System Status</div>
+        <div class="status-strip-main">
+          <span id="alprAlive" class="status-chip">Unknown</span>
+        </div>
       </div>
-    </div>
-    <div class="status-row">
-      <div class="status-section-label">Access</div>
-      <div id="networkAccessList" class="network-access-list"></div>
-    </div>
-    <div class="status-row">
-      <div class="status-section-label">GPS</div>
-      <div class="gps-status-wrap">
-        <span id="gpsStatusChip" class="gps-status-chip gps-status-disconnected">DISCONNECTED</span>
-        <span id="gpsStatusDetail" class="gps-status-detail">MiFi GPS unavailable</span>
+      <div class="status-row">
+        <div class="status-section-label">Access</div>
+        <div id="networkAccessList" class="network-access-list"></div>
       </div>
-    </div>
-    <div class="status-row">
-      <div class="status-section-label">Camera Status</div>
-      <div id="cameraStatusList" class="camera-status-list"></div>
+      <div class="status-row">
+        <div class="status-section-label">GPS</div>
+        <div class="gps-status-wrap">
+          <span id="gpsStatusChip" class="gps-status-chip gps-status-disconnected">DISCONNECTED</span>
+          <span id="gpsStatusDetail" class="gps-status-detail">MiFi GPS unavailable</span>
+        </div>
+      </div>
+      <div class="status-row">
+        <div class="status-section-label">Camera Status</div>
+        <div id="cameraStatusList" class="camera-status-list"></div>
+      </div>
     </div>
   </section>
 
@@ -95,6 +101,6 @@
   <img id="imageViewerImg" class="image-viewer-img" alt="ALPR read image">
 </div>
 
-<script src="/static/app.js?v=20260504-gps-status-1"></script>
+<script src="/static/app.js?v=20260506-ui-throttle-7"></script>
 </body>
 </html>

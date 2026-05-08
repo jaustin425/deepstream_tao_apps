@@ -646,7 +646,12 @@ function renderPreview(sources) {
     const separator = source.preview_url.includes("?") ? "&" : "?";
     const previewToken = source.preview_mode === "direct"
       ? Date.now()
-      : (source.preview_updated_utc || source.last_seen_utc || Date.now());
+      : [
+          source.preview_updated_utc || source.last_seen_utc || "",
+          source.preview_sequence || "",
+          source.last_frame_number || "",
+          Date.now(),
+        ].join("-");
     const imagePath = absolutePreviewUrl(`${source.preview_url}${separator}t=${encodeURIComponent(previewToken)}`);
     if (source.preview_mode === "direct") {
       currentPreviewUrl = imagePath;

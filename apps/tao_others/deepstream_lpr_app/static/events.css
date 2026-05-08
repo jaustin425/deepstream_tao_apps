@@ -457,6 +457,37 @@ select.filter-input { cursor: pointer; }
 /* ── utilities ── */
 .hidden { display: none !important; }
 
+/* ── Review Queue link in sidebar ── */
+.filter-divider {
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+.review-queue-btn {
+  display: block;
+  text-align: center;
+  padding: 9px 0;
+  border-radius: 6px;
+  background: #2a2d42;
+  color: #a0aec0;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .15s, color .15s;
+}
+.review-queue-btn:hover { background: #3d4468; color: #e2e8f0; }
+
+/* ── Per-row review column ── */
+.review-link {
+  font-size: 11px;
+  color: #4f9cf9;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.review-link:hover { text-decoration: underline; }
+.badge-review-ok  { background: #22543d; color: #9ae6b4; }
+.badge-review-bad { background: #742a2a; color: #feb2b2; }
+
 @media (max-width: 680px) {
   .layout { grid-template-columns: 1fr; }
   .filter-panel { border-right: none; border-bottom: 1px solid var(--border); }

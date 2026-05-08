@@ -49,6 +49,7 @@ struct EvidenceEvent {
 
     std::string model_version;
     std::string notes;
+    std::string ca_pattern;
 };
 
 struct RuntimePreviewDetection {
@@ -103,7 +104,8 @@ bool write_evidence_event(const cv::Mat& frame,
                           bool track_id_valid,
                           uint64_t track_id,
                           int veh_left, int veh_top, int veh_width, int veh_height,
-                          int plate_left, int plate_top, int plate_width, int plate_height);
+                          int plate_left, int plate_top, int plate_width, int plate_height,
+                          const std::string& ca_pattern = "");
 bool write_debug_event(const cv::Mat& frame,
                               const std::string& evidence_root,
                               const std::string& video_source,
@@ -117,4 +119,5 @@ bool write_debug_event(const cv::Mat& frame,
                               bool track_id_valid,
                               uint64_t track_id,
                               int veh_left, int veh_top, int veh_width, int veh_height,
-                              int plate_left, int plate_top, int plate_width, int plate_height);
+                              int plate_left, int plate_top, int plate_width, int plate_height,
+                              const std::string& ca_pattern = "");

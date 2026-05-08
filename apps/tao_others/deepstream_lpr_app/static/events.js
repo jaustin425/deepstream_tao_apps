@@ -161,6 +161,12 @@ function renderResults(items) {
         : `<span style="color:#444">—</span>`;
     const gpsDot = `<span class="gps-dot ${ev.gps_fix_valid ? 'has-fix' : ''}" title="${ev.gps_fix_valid ? `${ev.gps_latitude?.toFixed(5)}, ${ev.gps_longitude?.toFixed(5)}` : 'No fix'}"></span>`;
     const imgLinks = buildImgLinks(ev);
+    const reviewStatus = ev.review_status || 'unreviewed';
+    const reviewBadge = reviewStatus === 'correct'
+      ? `<span class="badge badge-review-ok">✓</span>`
+      : reviewStatus === 'incorrect'
+        ? `<span class="badge badge-review-bad">✗</span>`
+        : `<a class="review-link" href="/review?uuid=${esc(ev.event_uuid)}" title="Review this plate">Review</a>`;
 
     tr.innerHTML = `
       <td>${esc(ts)}</td>
@@ -172,6 +178,7 @@ function renderResults(items) {
       <td>${alertBadge}</td>
       <td>${gpsDot}</td>
       <td>${imgLinks}</td>
+      <td>${reviewBadge}</td>
     `;
     resultsBody.appendChild(tr);
   }

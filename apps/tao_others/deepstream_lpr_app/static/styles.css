@@ -251,6 +251,13 @@ main {
   margin-bottom: 10px;
 }
 
+.status-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .status-strip-label {
   font-size: 10px;
   text-transform: uppercase;
@@ -258,6 +265,27 @@ main {
   color: #8f8f8f;
   margin-bottom: 4px;
   text-align: center;
+}
+
+.status-strip-header .status-strip-label {
+  margin-bottom: 0;
+  text-align: left;
+}
+
+.status-toggle {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #3d4e6b;
+  background: #1b2434;
+  color: #d8e6ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.status-toggle:hover {
+  background: #243149;
 }
 
 .status-row {
@@ -834,6 +862,10 @@ main {
   .camera-pill {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .status-strip.status-collapsed {
+    padding-bottom: 8px;
   }
 }
 

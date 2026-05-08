@@ -7,6 +7,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -67,6 +68,7 @@ struct RuntimeSourceState {
     int last_frame_number = 0;
     std::string preview_path;
     std::string preview_updated_utc;
+    uint64_t preview_sequence = 0;
     int preview_overlay_width = 0;
     int preview_overlay_height = 0;
     std::vector<RuntimePreviewDetection> preview_detections;
@@ -251,11 +253,31 @@ static int clamp_preview_value(int value, int lower, int upper) {
     return std::max(lower, std::min(value, upper));
 }
 
+static cv::Size runtime_preview_size_for_frame(const cv::Mat& frame) {
+    if (frame.empty() || frame.cols <= 0 || frame.rows <= 0) {
+        return cv::Size(RUNTIME_PREVIEW_WIDTH, RUNTIME_PREVIEW_HEIGHT);
+    }
+
+    double scale = std::min(
+        static_cast<double>(RUNTIME_PREVIEW_WIDTH) / frame.cols,
+        static_cast<double>(RUNTIME_PREVIEW_HEIGHT) / frame.rows);
+    if (!std::isfinite(scale) || scale <= 0.0) {
+        return cv::Size(RUNTIME_PREVIEW_WIDTH, RUNTIME_PREVIEW_HEIGHT);
+    }
+
+    int preview_width = std::max(1, static_cast<int>(std::lround(frame.cols * scale)));
+    int preview_height = std::max(1, static_cast<int>(std::lround(frame.rows * scale)));
+    return cv::Size(preview_width, preview_height);
+}
+
 static RuntimePreviewDetection scale_preview_detection(const RuntimePreviewDetection& detection,
                                                       int frame_width,
-                                                      int frame_height) {
+                                                      int frame_height,
+                                                      int preview_width,
+                                                      int preview_height) {
     RuntimePreviewDetection scaled = detection;
-    if (frame_width <= 0 || frame_height <= 0) {
+    if (frame_width <= 0 || frame_height <= 0 ||
+        preview_width <= 0 || preview_height <= 0) {
         scaled.left = 0;
         scaled.top = 0;
         scaled.width = 0;
@@ -263,25 +285,25 @@ static RuntimePreviewDetection scale_preview_detection(const RuntimePreviewDetec
         return scaled;
     }
 
-    const double scale_x = static_cast<double>(RUNTIME_PREVIEW_WIDTH) / frame_width;
-    const double scale_y = static_cast<double>(RUNTIME_PREVIEW_HEIGHT) / frame_height;
+    const double scale_x = static_cast<double>(preview_width) / frame_width;
+    const double scale_y = static_cast<double>(preview_height) / frame_height;
 
     scaled.left = clamp_preview_value(
         static_cast<int>(std::lround(detection.left * scale_x)),
         0,
-        RUNTIME_PREVIEW_WIDTH);
+        preview_width);
     scaled.top = clamp_preview_value(
         static_cast<int>(std::lround(detection.top * scale_y)),
         0,
-        RUNTIME_PREVIEW_HEIGHT);
+        preview_height);
     scaled.width = clamp_preview_value(
         static_cast<int>(std::lround(detection.width * scale_x)),
         0,
-        RUNTIME_PREVIEW_WIDTH - scaled.left);
+        preview_width - scaled.left);
     scaled.height = clamp_preview_value(
         static_cast<int>(std::lround(detection.height * scale_y)),
         0,
-        RUNTIME_PREVIEW_HEIGHT - scaled.top);
+        preview_height - scaled.top);
     return scaled;
 }
 
@@ -969,7 +991,8 @@ static std::string build_live_event_payload(const EvidenceEvent& ev,
     out << "\"full_frame_path\":\"" << json_escape(case_relative_path(ev.full_frame_path)) << "\",";
     out << "\"annotated_frame_path\":\"" << json_escape(case_relative_path(ev.annotated_frame_path)) << "\",";
     out << "\"plate_crop_path\":\"" << json_escape(case_relative_path(ev.plate_crop_path)) << "\",";
-    out << "\"vehicle_crop_path\":\"" << json_escape(case_relative_path(ev.vehicle_crop_path)) << "\"";
+    out << "\"vehicle_crop_path\":\"" << json_escape(case_relative_path(ev.vehicle_crop_path)) << "\",";
+    out << "\"ca_pattern\":\"" << json_escape(ev.ca_pattern) << "\"";
     out << "}";
     return out.str();
 }
@@ -1050,6 +1073,9 @@ void update_runtime_source_status(const std::string& case_id,
         if (!entry.second.preview_updated_utc.empty()) {
             out << ",\"preview_updated_utc\":\"" << json_escape(entry.second.preview_updated_utc) << "\"";
         }
+        if (entry.second.preview_sequence > 0) {
+            out << ",\"preview_sequence\":" << entry.second.preview_sequence;
+        }
         if (entry.second.preview_overlay_width > 0 && entry.second.preview_overlay_height > 0) {
             out << ",\"preview_overlay_width\":" << entry.second.preview_overlay_width;
             out << ",\"preview_overlay_height\":" << entry.second.preview_overlay_height;
@@ -1118,14 +1144,14 @@ void update_runtime_source_preview(const cv::Mat& frame,
     }
 
     cv::Mat preview_frame;
-    cv::resize(frame, preview_frame,
-               cv::Size(RUNTIME_PREVIEW_WIDTH, RUNTIME_PREVIEW_HEIGHT),
-               0.0, 0.0, cv::INTER_AREA);
+    cv::Size preview_size = runtime_preview_size_for_frame(frame);
+    cv::resize(frame, preview_frame, preview_size, 0.0, 0.0, cv::INTER_AREA);
 
     std::vector<RuntimePreviewDetection> scaled_detections;
     scaled_detections.reserve(detections.size());
     for (const auto& detection : detections) {
-        RuntimePreviewDetection scaled = scale_preview_detection(detection, frame.cols, frame.rows);
+        RuntimePreviewDetection scaled = scale_preview_detection(
+            detection, frame.cols, frame.rows, preview_frame.cols, preview_frame.rows);
         if (scaled.width <= 0 || scaled.height <= 0) {
             continue;
         }
@@ -1143,6 +1169,7 @@ void update_runtime_source_preview(const cv::Mat& frame,
     source.source = video_source;
     source.preview_path = relative_path;
     source.preview_updated_utc = utc_now_iso8601();
+    source.preview_sequence++;
     source.preview_overlay_width = preview_frame.cols;
     source.preview_overlay_height = preview_frame.rows;
     source.preview_detections = scaled_detections;
@@ -1613,7 +1640,8 @@ bool append_event_jsonl(const std::string& jsonl_path, const EvidenceEvent& ev) 
         << "\"vehicle_crop_sha256\":\"" << json_escape(ev.vehicle_crop_sha256) << "\","
         << "\"annotated_frame_sha256\":\"" << json_escape(ev.annotated_frame_sha256) << "\"," 
         << "\"model_version\":\"" << json_escape(ev.model_version) << "\","
-        << "\"notes\":\"" << json_escape(ev.notes) << "\""
+        << "\"notes\":\"" << json_escape(ev.notes) << "\","
+        << "\"ca_pattern\":\"" << json_escape(ev.ca_pattern) << "\""
         << "}\n";
 
     std::string case_dir = dirname_from_path(jsonl_path);
@@ -1672,7 +1700,8 @@ bool write_evidence_event(const cv::Mat& frame,
                           bool track_id_valid,
                           uint64_t track_id,
                           int veh_left, int veh_top, int veh_width, int veh_height,
-                          int plate_left, int plate_top, int plate_width, int plate_height) {
+                          int plate_left, int plate_top, int plate_width, int plate_height,
+                          const std::string& ca_pattern) {
     if (plate.size() < 5) return false;
 
     if (!ensure_session_json(evidence_root, video_source, model_version)) {
@@ -1696,6 +1725,7 @@ bool write_evidence_event(const cv::Mat& frame,
     ev.video_source = video_source;
     ev.timestamp_utc = utc_now_iso8601();
     apply_latest_gps_fix(ev);
+    ev.ca_pattern = ca_pattern;
 
     ev.veh_left = veh_left;
     ev.veh_top = veh_top;
@@ -1823,7 +1853,8 @@ bool write_debug_event(const cv::Mat& frame,
                        bool track_id_valid,
                        uint64_t track_id,
                        int veh_left, int veh_top, int veh_width, int veh_height,
-                       int plate_left, int plate_top, int plate_width, int plate_height) {
+                       int plate_left, int plate_top, int plate_width, int plate_height,
+                       const std::string& ca_pattern) {
     if (plate.size() < 5) return false;
 
     if (!ensure_session_json(evidence_root, video_source, model_version)) {
@@ -1848,6 +1879,7 @@ bool write_debug_event(const cv::Mat& frame,
     ev.video_source = video_source;
     ev.timestamp_utc = utc_now_iso8601();
     apply_latest_gps_fix(ev);
+    ev.ca_pattern = ca_pattern;
     ev.veh_left = veh_left;
     ev.veh_top = veh_top;
     ev.veh_width = veh_width;

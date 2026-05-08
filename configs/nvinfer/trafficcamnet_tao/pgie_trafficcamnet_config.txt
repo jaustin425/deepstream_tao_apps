@@ -48,4 +48,4 @@ pre-cluster-threshold=0.2
 [class-attrs-0]
 topk=20
 nms-iou-threshold=0.5
-pre-cluster-threshold=0.4
+pre-cluster-threshold=0.2

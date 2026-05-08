@@ -28,7 +28,7 @@ alpr-runtime:
   latency-metrics: 1
 
 source-list:
-  list: rtsp://alpr:alpr@169.254.42.56/axis-media/media.amp?videocodec=h264&resolution=1280x720
+  list: v4l2:///dev/v4l/by-path/platform-3610000.usb-usb-0:1.2:1.0-video-index0;rtsp://alpr:alpr@192.168.1.20/axis-media/media.amp
 
 analytics:
   enable: 1
@@ -88,4 +88,5 @@ tracker:
 live-dashboard:
   endpoint: http://127.0.0.1:8080/api/live-event
   source-map:
-    source_0: AXIS-P12M20
+    source_0: RF
+    source_1: LF

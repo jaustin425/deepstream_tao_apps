@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ALPR Plate Review</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/review.css?v=20260504-review-1">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="eyebrow">Dataset Labeling</div>
+    <h1>Plate Review</h1>
+  </div>
+  <div class="topbar-actions">
+    <a class="nav-link" href="/">Live Events</a>
+    <a class="nav-link" href="/events">Event History</a>
+    <a class="nav-link" href="/hotlists">Hotlists</a>
+    <a class="nav-link" href="/config">Camera Config</a>
+  </div>
+</header>
+
+<div class="review-layout">
+
+  <!-- Left: plate crop + vehicle thumbnail -->
+  <div class="image-panel">
+    <div class="plate-crop-wrap">
+      <img id="plateCrop" src="" alt="plate crop" class="plate-crop-img hidden">
+      <div id="plateCropEmpty" class="plate-crop-empty">No image</div>
+    </div>
+    <div class="vehicle-thumb-wrap">
+      <img id="vehicleThumb" src="" alt="vehicle" class="vehicle-thumb hidden">
+    </div>
+  </div>
+
+  <!-- Right: review form -->
+  <div class="form-panel">
+
+    <div class="progress-bar">
+      <span id="progressText">Loading…</span>
+      <div class="progress-outer"><div class="progress-inner" id="progressInner" style="width:0%"></div></div>
+    </div>
+
+    <div class="plate-display">
+      <span class="plate-label">Plate</span>
+      <span id="plateText" class="plate-text">—</span>
+      <span id="caPattern" class="ca-tag hidden"></span>
+    </div>
+
+    <div class="meta-row">
+      <span id="metaSource" class="meta-chip"></span>
+      <span id="metaConf" class="meta-chip"></span>
+      <span id="metaTime" class="meta-chip"></span>
+    </div>
+
+    <div class="form-section">
+      <label class="form-label">Correction <span class="hint">(leave blank if plate is correct as shown)</span></label>
+      <input id="correctedPlate" type="text" class="text-input" maxlength="10" placeholder="e.g. 7ABC123">
+    </div>
+
+    <div class="form-row">
+      <div class="form-section half">
+        <label class="form-label">State</label>
+        <select id="plateState" class="select-input">
+          <option value="">— unknown —</option>
+          <option value="CA">California</option>
+          <option value="other">Other state</option>
+        </select>
+      </div>
+      <div class="form-section half">
+        <label class="form-label">Type</label>
+        <select id="plateType" class="select-input">
+          <option value="">— unknown —</option>
+          <option value="passenger">Passenger</option>
+          <option value="commercial">Commercial</option>
+          <option value="trailer">Trailer</option>
+          <option value="motorcycle">Motorcycle</option>
+          <option value="personalized">Personalized</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <label class="form-label">Notes <span class="hint">(optional)</span></label>
+      <input id="reviewNotes" type="text" class="text-input" maxlength="200" placeholder="">
+    </div>
+
+    <div class="action-row">
+      <button id="btnCorrect" class="btn btn-correct" title="Mark correct (C)">✓ Correct</button>
+      <button id="btnIncorrect" class="btn btn-incorrect" title="Mark incorrect (I)">✗ Incorrect</button>
+      <button id="btnSkip" class="btn btn-skip" title="Skip (→)">→ Skip</button>
+      <button id="btnPrev" class="btn btn-prev" title="Previous (←)">← Prev</button>
+    </div>
+
+    <div class="keyboard-hint">
+      <kbd>C</kbd> correct &nbsp; <kbd>I</kbd> incorrect &nbsp;
+      <kbd>←</kbd> prev &nbsp; <kbd>→</kbd> skip &nbsp; <kbd>Enter</kbd> submit
+    </div>
+
+    <div id="statusMsg" class="status-msg hidden"></div>
+
+  </div><!-- /form-panel -->
+
+</div><!-- /review-layout -->
+
+<!-- Export panel -->
+<div class="export-panel">
+  <div class="export-title">Export Dataset</div>
+  <div class="export-description">Copies plate crops + labels for all reviewed records matching the filters below into <code>evidence/dataset/</code>.</div>
+  <div class="export-controls">
+    <div class="export-field">
+      <label class="form-label">State</label>
+      <select id="exportState" class="select-input">
+        <option value="">All states</option>
+        <option value="CA">California</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="export-field">
+      <label class="form-label">Type</label>
+      <select id="exportType" class="select-input">
+        <option value="">All types</option>
+        <option value="passenger">Passenger</option>
+        <option value="commercial">Commercial</option>
+        <option value="trailer">Trailer</option>
+        <option value="motorcycle">Motorcycle</option>
+        <option value="personalized">Personalized</option>
+      </select>
+    </div>
+    <div class="export-field">
+      <label class="form-label">Review status</label>
+      <select id="exportStatus" class="select-input">
+        <option value="correct">Correct only</option>
+        <option value="incorrect">Incorrect only</option>
+      </select>
+    </div>
+    <div class="export-field">
+      <label class="form-label">Limit</label>
+      <input id="exportLimit" type="number" class="text-input" value="2000" min="1" max="50000">
+    </div>
+    <button id="btnExport" class="btn btn-export">&#8681; Export</button>
+  </div>
+  <div id="exportResult" class="export-result hidden"></div>
+</div>
+
+<script src="/static/review.js?v=20260504-review-1"></script>
+</body>
+</html>

@@ -19,23 +19,28 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ################################################################################
+#
+# Dual Axis P12 IP camera configuration
+#   source_0: AXIS P1214-E  @ 169.254.42.55
+#   source_1: AXIS P12/M20  @ 169.254.42.56
 
 alpr-runtime:
-  profile: patrol-fast
-  low-latency-rtsp: 1
-  rtsp-latency-ms: 80
-  rtsp-drop-on-latency: 1
+  profile: axis-stable
+  low-latency-rtsp: 0
+  rtsp-latency-ms: 200
+  rtsp-drop-on-latency: 0
+  rtsp-transport: tcp
   latency-metrics: 1
 
 source-list:
-  list: rtsp://alpr:alpr@169.254.42.56/axis-media/media.amp?videocodec=h264&resolution=1280x720
+  list: rtsp://alpr:alpr@169.254.42.56/axis-media/media.amp?videocodec=h264&resolution=1280x720&fps=15
 
 analytics:
   enable: 1
   config-file: config_nvdsanalytics.txt
 
 output:
-  ## 1:file ouput  2:fake output 3:eglsink output
+  ## 1:file output  2:fake output  3:eglsink output
   type: 2
   ## 0: H264 encoder  1:H265 encoder
   enc: 0
@@ -88,4 +93,4 @@ tracker:
 live-dashboard:
   endpoint: http://127.0.0.1:8080/api/live-event
   source-map:
-    source_0: AXIS-P12M20
+    source_0: cam1-P12M20

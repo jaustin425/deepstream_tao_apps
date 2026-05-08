@@ -18,6 +18,16 @@ BACKEND_PORT="${ALPR_DASHBOARD_PORT:-8080}"
 export ALPR_DASHBOARD_HOST="$BACKEND_HOST"
 export ALPR_DASHBOARD_PORT="$BACKEND_PORT"
 ALPR_CONFIG="${1:-$DEFAULT_CONFIG}"
+
+if [[ "$ALPR_CONFIG" != /* ]]; then
+  ALPR_CONFIG="$(realpath -m "$ALPR_CONFIG")"
+fi
+
+if [[ ! -f "$ALPR_CONFIG" ]]; then
+  echo "ALPR config not found: $ALPR_CONFIG"
+  exit 1
+fi
+
 export ALPR_ACTIVE_CONFIG_PATH="$ALPR_CONFIG"
 
 resolve_backend_python() {
@@ -146,9 +156,18 @@ stop_pid_file() {
 
 emit_alpr_failure_hint() {
   local log_file="$1"
+  local log_offset="${2:-}"
   local recent_log
 
-  recent_log="$(tail -n 120 "$log_file" 2>/dev/null || true)"
+  if [[ -n "$log_offset" && "$log_offset" =~ ^[0-9]+$ ]]; then
+    recent_log="$(tail -c +"$((log_offset + 1))" "$log_file" 2>/dev/null || true)"
+  else
+    recent_log=""
+  fi
+
+  if [[ -z "$recent_log" ]]; then
+    recent_log="$(tail -n 120 "$log_file" 2>/dev/null || true)"
+  fi
 
   if grep -Eq 'Cannot identify device|No such file or directory' <<<"$recent_log"; then
     echo "Detected missing camera device while starting DeepStream."
@@ -174,7 +193,7 @@ emit_alpr_failure_hint() {
     return
   fi
 
-  echo "Recent ALPR log tail:"
+  echo "Fresh ALPR log tail:"
   printf '%s\n' "$recent_log"
 }
 
@@ -203,6 +222,11 @@ if ! is_running "$BACKEND_PID_FILE"; then
   exit 1
 fi
 
+ALPR_LOG_OFFSET=0
+if [[ -f "$ALPR_LOG" ]]; then
+  ALPR_LOG_OFFSET="$(wc -c < "$ALPR_LOG" | tr -d '[:space:]')"
+fi
+
 printf '\n[%s] starting alpr\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$ALPR_LOG"
 (
   cd "$APP_DIR"
@@ -214,7 +238,7 @@ printf '\n[%s] starting alpr\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$ALPR_LOG"
 sleep 1
 if ! is_running "$ALPR_PID_FILE"; then
   echo "ALPR failed to start. Stopping backend. Check $ALPR_LOG"
-  emit_alpr_failure_hint "$ALPR_LOG"
+  emit_alpr_failure_hint "$ALPR_LOG" "$ALPR_LOG_OFFSET"
   stop_pid_file "$BACKEND_PID_FILE"
   exit 1
 fi
