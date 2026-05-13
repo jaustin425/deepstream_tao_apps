@@ -520,6 +520,9 @@ function renderSourceList(sources) {
       metrics.appendChild(metricChip(`${source.frame_width}x${source.frame_height}`));
     }
     metrics.appendChild(metricChip(`Frame ${source.last_frame_number ?? "-"}`));
+    if (source.last_latency_ms_from_readable !== undefined && source.last_latency_ms_from_readable !== null && source.last_latency_ms_from_readable >= 0) {
+      metrics.appendChild(metricChip(`${source.last_latency_event || "READ"} ${source.last_latency_ms_from_readable}ms`));
+    }
 
     const detail = document.createElement("div");
     detail.className = "source-detail";
@@ -708,6 +711,16 @@ function renderDiagnostics(sources) {
     "Preview age",
     source.preview_mode === "direct" ? "live" : previewAgeSeconds === null ? "n/a" : `${previewAgeSeconds}s`,
   ));
+  diagnosticsPanel.appendChild(diagnosticsRow("Pipeline FPS", `${Number(source.fps || 0).toFixed(1)} FPS`));
+  diagnosticsPanel.appendChild(diagnosticsRow("Frame number", source.last_frame_number ?? "n/a"));
+  diagnosticsPanel.appendChild(diagnosticsRow("Preview sequence", source.preview_sequence ?? "n/a"));
+  diagnosticsPanel.appendChild(diagnosticsRow(
+    "Last read latency",
+    source.last_latency_event
+      ? `${source.last_latency_event}: ${source.last_latency_ms_from_readable ?? "n/a"}ms readable, ${source.last_latency_ms_from_first_read ?? "n/a"}ms first read`
+      : "n/a",
+  ));
+  diagnosticsPanel.appendChild(diagnosticsRow("Last read latency time", formatDateTime(source.last_latency_utc)));
   diagnosticsPanel.appendChild(diagnosticsRow("Last seen", formatDateTime(source.last_seen_utc)));
 }
 
@@ -818,7 +831,9 @@ function renderControls(sources, presets = DEFAULT_CAMERA_PRESETS) {
 }
 
 function renderRuntimeSummary(payload) {
-  runtimeSummary.textContent = `Case ${payload.current_case_id || "n/a"} | ALPR ${payload.alpr_process_alive ? "running" : "offline"} | Runtime update ${formatTime(payload.runtime_status_utc)} | ${payload.sources.length} source(s)`;
+  const profile = payload.runtime_profile || "n/a";
+  const latency = payload.rtsp_latency_ms ?? "n/a";
+  runtimeSummary.textContent = `Case ${payload.current_case_id || "n/a"} | ALPR ${payload.alpr_process_alive ? "running" : "offline"} | Profile ${profile} | RTSP ${latency}ms | Runtime update ${formatTime(payload.runtime_status_utc)} | ${payload.sources.length} source(s)`;
 }
 
 async function refresh() {

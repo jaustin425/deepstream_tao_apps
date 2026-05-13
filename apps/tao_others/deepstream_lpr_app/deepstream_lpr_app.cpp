@@ -66,11 +66,10 @@
 #define VEHICLE_TYPE_CLASSIFIER_UID 5
 #define VEHICLE_MAKE_CLASSIFIER_UID 6
 
-/* The muxer output resolution must be set if the input streams will be of
- * different resolution. Match the primary detector input size so the live
- * path does not require an extra GPU resize inside nvinfer. */
-#define MUXER_OUTPUT_WIDTH 960
-#define MUXER_OUTPUT_HEIGHT 544
+/* Preserve Axis 720p detail through the muxer so LPD/LPR secondary crops keep
+ * enough plate pixels. PGIE still scales internally to its model input. */
+#define MUXER_OUTPUT_WIDTH 1280
+#define MUXER_OUTPUT_HEIGHT 720
 
 /* Match the Arducam USB camera mode that is already proven stable through the
  * direct-preview path on this host to avoid renegotiation and high-bandwidth
@@ -97,6 +96,13 @@ struct PlateTrack {
     std::map<std::string, int> votes;
 
     std::map<int, std::map<char, int>> char_votes;
+  struct Observation {
+    std::string plate;
+    int weight = 0;
+    int frame_number = 0;
+    float probability = 0.0f;
+  };
+  std::vector<Observation> observations;
   std::map<std::string, int> make_votes;
   std::map<std::string, int> type_votes;
   std::map<std::string, int> color_votes;
@@ -244,6 +250,8 @@ static const int RECENT_PLATE_ATTRIBUTE_MAX_AGE_FRAMES = 1800;
 static const int SOURCE_PLATE_EVENT_SUPPRESS_FRAMES = 180;
 static const int SOURCE_PLATE_EVENT_MIN_REEMIT_FRAMES = 180;
 static const int SOURCE_PLATE_EVENT_IMPROVEMENT_DELTA = 12;
+static const int PLATE_OBSERVATION_WINDOW_FRAMES = 45;
+static const size_t PLATE_OBSERVATION_MAX_COUNT = 48;
 
 static std::string preview_focus_state_for_plate(int confidence, bool readable) {
   if (confidence >= REJECT_THRESHOLD) {
@@ -496,6 +504,74 @@ static int parse_rtsp_protocols(const std::string& value, int fallback) {
   return fallback;
 }
 
+static void apply_named_runtime_profile(AlprRuntimeConfig& config,
+                                        const std::string& profile_name) {
+  std::string normalized_profile = to_lower_copy(trim_copy(profile_name));
+  if (normalized_profile.empty()) {
+    normalized_profile = "patrol-fast";
+  }
+
+  config.profile = profile_name.empty() ? normalized_profile : profile_name;
+  config.low_latency_rtsp = true;
+  config.rtsp_latency_ms = 80;
+  config.rtsp_drop_on_latency = true;
+  config.rtsp_protocols = 4;
+  config.latency_metrics = true;
+
+  if (normalized_profile == "balanced" || normalized_profile == "review") {
+    config.low_latency_rtsp = false;
+    config.rtsp_latency_ms = 200;
+    config.rtsp_drop_on_latency = false;
+    return;
+  }
+
+  if (normalized_profile == "axis-stable") {
+    config.low_latency_rtsp = false;
+    config.rtsp_latency_ms = 200;
+    config.rtsp_drop_on_latency = false;
+    config.rtsp_protocols = 4;
+    return;
+  }
+
+  if (normalized_profile == "axis-low-lag") {
+    config.low_latency_rtsp = false;
+    config.rtsp_latency_ms = 120;
+    config.rtsp_drop_on_latency = false;
+    config.rtsp_protocols = 4;
+    return;
+  }
+
+  if (normalized_profile == "axis-fastest") {
+    config.low_latency_rtsp = true;
+    config.rtsp_latency_ms = 80;
+    config.rtsp_drop_on_latency = true;
+    config.rtsp_protocols = 4;
+    return;
+  }
+}
+
+static void apply_runtime_yaml_overrides(AlprRuntimeConfig& config,
+                                         const YAML::Node& runtime) {
+  if (!runtime || !runtime.IsMap()) {
+    return;
+  }
+
+  config.low_latency_rtsp =
+    yaml_bool_or_default(runtime["low-latency-rtsp"], config.low_latency_rtsp);
+  config.rtsp_latency_ms =
+    yaml_int_or_default(runtime["rtsp-latency-ms"], config.rtsp_latency_ms);
+  config.rtsp_drop_on_latency =
+    yaml_bool_or_default(runtime["rtsp-drop-on-latency"],
+                         config.rtsp_drop_on_latency);
+  if (runtime["rtsp-transport"] && runtime["rtsp-transport"].IsScalar()) {
+    config.rtsp_protocols =
+      parse_rtsp_protocols(runtime["rtsp-transport"].as<std::string>(),
+                           config.rtsp_protocols);
+  }
+  config.latency_metrics =
+    yaml_bool_or_default(runtime["latency-metrics"], config.latency_metrics);
+}
+
 static AlprRuntimeConfig load_alpr_runtime_config(const std::string& config_path) {
   AlprRuntimeConfig config;
 
@@ -512,36 +588,34 @@ static AlprRuntimeConfig load_alpr_runtime_config(const std::string& config_path
     if (runtime["profile"] && runtime["profile"].IsScalar()) {
       config.profile = runtime["profile"].as<std::string>();
     }
-
-    std::string normalized_profile = to_lower_copy(trim_copy(config.profile));
-    if (normalized_profile == "balanced" || normalized_profile == "review") {
-      config.low_latency_rtsp = false;
-      config.rtsp_latency_ms = 200;
-      config.rtsp_drop_on_latency = false;
-      config.rtsp_protocols = 4;
-    } else {
-      config.profile = config.profile.empty() ? "patrol-fast" : config.profile;
-      config.low_latency_rtsp = true;
-      config.rtsp_latency_ms = 80;
-      config.rtsp_drop_on_latency = true;
-      config.rtsp_protocols = 4;
-      config.latency_metrics = true;
+    const char* env_profile = std::getenv("ALPR_RUNTIME_PROFILE");
+    if (env_profile && trim_copy(env_profile).size() > 0) {
+      config.profile = trim_copy(env_profile);
     }
 
-    config.low_latency_rtsp =
-      yaml_bool_or_default(runtime["low-latency-rtsp"], config.low_latency_rtsp);
-    config.rtsp_latency_ms =
-      yaml_int_or_default(runtime["rtsp-latency-ms"], config.rtsp_latency_ms);
-    config.rtsp_drop_on_latency =
-      yaml_bool_or_default(runtime["rtsp-drop-on-latency"],
-                           config.rtsp_drop_on_latency);
-    if (runtime["rtsp-transport"] && runtime["rtsp-transport"].IsScalar()) {
-      config.rtsp_protocols =
-        parse_rtsp_protocols(runtime["rtsp-transport"].as<std::string>(),
-                             config.rtsp_protocols);
+    apply_named_runtime_profile(config, config.profile);
+
+    YAML::Node profiles = runtime["profiles"];
+    if (profiles && profiles.IsMap()) {
+      YAML::Node selected_profile = profiles[config.profile];
+      if (!selected_profile || !selected_profile.IsMap()) {
+        std::string normalized_profile = to_lower_copy(trim_copy(config.profile));
+        for (YAML::const_iterator it = profiles.begin(); it != profiles.end(); ++it) {
+          if (!it->first.IsScalar()) {
+            continue;
+          }
+          std::string key = it->first.as<std::string>();
+          if (to_lower_copy(trim_copy(key)) == normalized_profile) {
+            selected_profile = it->second;
+            config.profile = key;
+            break;
+          }
+        }
+      }
+      apply_runtime_yaml_overrides(config, selected_profile);
     }
-    config.latency_metrics =
-      yaml_bool_or_default(runtime["latency-metrics"], config.latency_metrics);
+
+    apply_runtime_yaml_overrides(config, runtime);
   } catch (const std::exception& e) {
     g_printerr("Failed to load alpr-runtime config from %s: %s\n",
                config_path.c_str(), e.what());
@@ -812,6 +886,13 @@ static void log_plate_latency_event(const char* event_type,
     frames_from_readable = current_frame - track.first_readable_frame;
     ms_from_readable = (current_time_us - track.first_readable_time_us) / 1000;
   }
+
+  update_runtime_latency_status(video_source,
+                                event_type ? event_type : "",
+                                frames_from_first_read,
+                                static_cast<int>(ms_from_first_read),
+                                frames_from_readable,
+                                static_cast<int>(ms_from_readable));
 
   std::cout << "ALPR_LATENCY event=" << event_type
             << " source=" << video_source
@@ -2403,6 +2484,15 @@ static bool has_letters_and_digits(const std::string& text) {
       else ++pos_it;
     }
 
+    track.observations.erase(
+        std::remove_if(track.observations.begin(),
+                       track.observations.end(),
+                       [current_frame](const PlateTrack::Observation& observation) {
+                         return current_frame - observation.frame_number >
+                                PLATE_OBSERVATION_WINDOW_FRAMES;
+                       }),
+        track.observations.end());
+
     decay_attribute_votes(track.make_votes);
     decay_attribute_votes(track.type_votes);
     decay_attribute_votes(track.color_votes);
@@ -2700,6 +2790,175 @@ static int plate_pattern_score(const std::string& text) {
   }
 
   return score;
+}
+
+static std::string choose_better_plate(const std::string& a, int a_votes,
+                                       const std::string& b, int b_votes);
+static std::string normalize_plate(std::string p);
+static bool same_plate_family_strict(const std::string& a, const std::string& b);
+
+struct PlateConsensusChoice {
+  std::string plate;
+  int best_votes = 0;
+  int second_votes = 0;
+  int lifetime_votes = 0;
+  int recent_votes = 0;
+  int recent_observations = 0;
+};
+
+static void add_plate_family_vote(std::map<std::string, int>& vote_map,
+                                  const std::string& plate,
+                                  int votes) {
+  if (plate.empty() || votes <= 0) {
+    return;
+  }
+
+  for (std::map<std::string, int>::iterator it = vote_map.begin();
+       it != vote_map.end();
+       ++it) {
+    if (!same_plate_family(normalize_plate(it->first), normalize_plate(plate))) {
+      continue;
+    }
+
+    std::string old_key = it->first;
+    int old_votes = it->second;
+    int new_votes = old_votes + votes;
+    std::string best_key = choose_better_plate(old_key, old_votes, plate, votes);
+    if (best_key == old_key) {
+      it->second = new_votes;
+    } else {
+      vote_map.erase(it);
+      vote_map[best_key] = new_votes;
+    }
+    return;
+  }
+
+  vote_map[plate] += votes;
+}
+
+static void remember_plate_observation(PlateTrack& track,
+                                       const std::string& plate,
+                                       int weight,
+                                       int current_frame,
+                                       float probability) {
+  if (plate.empty() || weight <= 0) {
+    return;
+  }
+
+  track.observations.push_back(PlateTrack::Observation{
+      normalize_plate(plate),
+      weight,
+      current_frame,
+      probability});
+
+  track.observations.erase(
+      std::remove_if(track.observations.begin(),
+                     track.observations.end(),
+                     [current_frame](const PlateTrack::Observation& observation) {
+                       return current_frame - observation.frame_number >
+                              PLATE_OBSERVATION_WINDOW_FRAMES;
+                     }),
+      track.observations.end());
+
+  if (track.observations.size() > PLATE_OBSERVATION_MAX_COUNT) {
+    track.observations.erase(
+        track.observations.begin(),
+        track.observations.begin() +
+            static_cast<std::vector<PlateTrack::Observation>::difference_type>(
+                track.observations.size() - PLATE_OBSERVATION_MAX_COUNT));
+  }
+}
+
+static int decayed_observation_weight(const PlateTrack::Observation& observation,
+                                      int current_frame) {
+  int age = std::max(0, current_frame - observation.frame_number);
+  int weight = observation.weight;
+  if (age > 30) {
+    weight = (weight + 1) / 2;
+  } else if (age > 15) {
+    weight = (weight * 3 + 3) / 4;
+  }
+  return std::max(1, weight);
+}
+
+static PlateConsensusChoice choose_track_consensus_plate(const PlateTrack& track,
+                                                         int current_frame) {
+  std::map<std::string, int> lifetime_votes;
+  std::map<std::string, int> recent_votes;
+  std::map<std::string, int> blended_votes;
+  std::map<std::string, int> recent_counts;
+
+  for (const auto& kv : track.votes) {
+    add_plate_family_vote(lifetime_votes, normalize_plate(kv.first), kv.second);
+  }
+
+  for (const PlateTrack::Observation& observation : track.observations) {
+    if (current_frame - observation.frame_number > PLATE_OBSERVATION_WINDOW_FRAMES) {
+      continue;
+    }
+    int weight = decayed_observation_weight(observation, current_frame);
+    add_plate_family_vote(recent_votes, observation.plate, weight);
+    recent_counts[observation.plate] += 1;
+  }
+
+  for (const auto& kv : lifetime_votes) {
+    add_plate_family_vote(blended_votes, kv.first, std::max(1, kv.second / 2));
+  }
+  for (const auto& kv : recent_votes) {
+    add_plate_family_vote(blended_votes, kv.first, kv.second * 2);
+  }
+
+  for (auto& kv : blended_votes) {
+    int pattern_score = plate_pattern_score(kv.first);
+    if (pattern_score > 0) {
+      kv.second += std::min(8, pattern_score / 2);
+    }
+    CAPatternFit ca = ca_best_pattern_fit(kv.first);
+    if (!ca.name.empty() && kv.first.size() > 0 && ca.fit_score == static_cast<int>(kv.first.size())) {
+      kv.second += 4;
+    }
+  }
+
+  PlateConsensusChoice result;
+  std::string second_plate;
+  for (const auto& kv : blended_votes) {
+    if (kv.second > result.best_votes) {
+      second_plate = result.plate;
+      result.second_votes = result.best_votes;
+      result.plate = kv.first;
+      result.best_votes = kv.second;
+    } else if (kv.second > result.second_votes) {
+      second_plate = kv.first;
+      result.second_votes = kv.second;
+    }
+  }
+
+  if (!result.plate.empty() && !second_plate.empty() &&
+      same_plate_family_strict(result.plate, second_plate) &&
+      result.best_votes >= result.second_votes + 4) {
+    result.second_votes = 0;
+  }
+
+  for (const auto& kv : lifetime_votes) {
+    if (same_plate_family_strict(result.plate, kv.first) ||
+        normalize_plate(result.plate) == normalize_plate(kv.first)) {
+      result.lifetime_votes = std::max(result.lifetime_votes, kv.second);
+    }
+  }
+  for (const auto& kv : recent_votes) {
+    if (same_plate_family_strict(result.plate, kv.first) ||
+        normalize_plate(result.plate) == normalize_plate(kv.first)) {
+      result.recent_votes = std::max(result.recent_votes, kv.second);
+    }
+  }
+  for (const auto& kv : recent_counts) {
+    if (same_plate_family_strict(result.plate, kv.first) ||
+        normalize_plate(result.plate) == normalize_plate(kv.first)) {
+      result.recent_observations += kv.second;
+    }
+  }
+
+  return result;
 }
 
 static std::string choose_better_plate(const std::string& a, int a_votes,
@@ -3472,11 +3731,11 @@ typedef struct _perf_measure {
  * restores the original bounding boxes so attribute classifiers (make, type,  *
  * color) still receive the full vehicle crop.                                  *
  *                                                                              *
- * Tuning knobs (frame is 960×544):                                             */
-#define LV_HEIGHT_THRESH 160.0f  /* px – vehicles taller than this are "large" */
-#define LV_WIDTH_THRESH  380.0f  /* px – OR wider than this are "large"         */
+ * Tuning knobs (frame is 1280×720):                                            */
+#define LV_HEIGHT_THRESH 210.0f  /* px – vehicles taller than this are "large" */
+#define LV_WIDTH_THRESH  505.0f  /* px – OR wider than this are "large"         */
 #define LV_PLATE_FRAC      0.40f /* keep bottom 40 % of the box for LPD         */
-#define LV_PLATE_MIN_H    80.0f  /* never shrink the crop below this height      */
+#define LV_PLATE_MIN_H   105.0f  /* never shrink the crop below this height      */
 
 /* misc_obj_info indices used to stash the original bounding box between probes.
  * MAX_USER_FIELDS == 4, so valid indices are 0–3. */
@@ -3603,7 +3862,11 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
     if (runtime_frame_number <= 0 && frame_number > 0) {
       runtime_frame_number = frame_number;
     }
-    update_runtime_source_status(current_case_id(), video_source, runtime_frame_number);
+    update_runtime_source_status(current_case_id(),
+                                 video_source,
+                                 runtime_frame_number,
+                                 static_cast<int>(frame_meta->source_frame_width),
+                                 static_cast<int>(frame_meta->source_frame_height));
     std::vector<RuntimePreviewDetection> frame_preview_detections;
     bool preview_due = should_update_runtime_source_preview(video_source);
     cv::Mat frame_mat;
@@ -3755,40 +4018,32 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                 if (!merged) {
                     track.votes[plate_str] += weight;
                 }
+                remember_plate_observation(track,
+                                           plate_str,
+                                           weight,
+                                           frame_number,
+                                           label_info->result_prob);
                 track.last_seen_frame = frame_number;
                 track.missed_frames = 0;
 
-                std::string best_plate;
-                int best_votes = 0;
-                std::string second_plate;
-                int second_votes = 0;
-
-                for (auto& v : track.votes) {
-                    if (v.second > best_votes) {
-                    second_plate = best_plate;
-                    second_votes = best_votes;
-                        best_plate = v.first;
-                        best_votes = v.second;
-                  } else if (v.second > second_votes) {
-                    second_plate = v.first;
-                    second_votes = v.second;
-                    }
-                }
-
-                if (!best_plate.empty() && !second_plate.empty()) {
-                  if (same_plate_family_strict(best_plate, second_plate)) {
-                    if (best_votes >= second_votes + 3) {
-                      second_plate.clear();
-                      second_votes = 0;
-                    }
-                  }
-                }
+                PlateConsensusChoice consensus_choice =
+                  choose_track_consensus_plate(track, frame_number);
+                int best_votes = consensus_choice.best_votes;
+                int second_votes = consensus_choice.second_votes;
 
                 std::string consensus_plate =
                   finalize_consensus_plate(track, build_consensus_plate_generic(track));
 
                 consensus_plate =
                   finalize_consensus_plate(track, refine_consensus_with_confusables(track, consensus_plate));
+
+                if (!consensus_choice.plate.empty() &&
+                    (consensus_plate.empty() ||
+                     consensus_plate.find('?') != std::string::npos ||
+                     consensus_choice.recent_observations >= 2 ||
+                     consensus_choice.best_votes >= best_votes + 8)) {
+                  consensus_plate = consensus_choice.plate;
+                }
 
                 if (preview_detection && !consensus_plate.empty()) {
                   preview_detection->plate = consensus_plate;
@@ -4490,6 +4745,12 @@ int main(int argc, char *argv[]) {
           g_runtime_config.rtsp_drop_on_latency ? 1 : 0,
           g_runtime_config.rtsp_protocols,
           g_runtime_config.latency_metrics ? 1 : 0);
+  update_runtime_pipeline_status(g_runtime_config.profile,
+                                 g_runtime_config.low_latency_rtsp,
+                                 g_runtime_config.rtsp_latency_ms,
+                                 g_runtime_config.rtsp_drop_on_latency,
+                                 g_runtime_config.rtsp_protocols,
+                                 g_runtime_config.latency_metrics);
 
   // For Chinese language supporting
   setlocale(LC_CTYPE, "");

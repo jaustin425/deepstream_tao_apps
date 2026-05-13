@@ -66,17 +66,40 @@ struct RuntimeSourceState {
     std::string source;
     std::string last_seen_utc;
     int last_frame_number = 0;
+    int previous_fps_frame_number = 0;
+    std::chrono::steady_clock::time_point previous_fps_time =
+        std::chrono::steady_clock::time_point::min();
+    double fps = 0.0;
+    int frame_width = 0;
+    int frame_height = 0;
     std::string preview_path;
     std::string preview_updated_utc;
     uint64_t preview_sequence = 0;
     int preview_overlay_width = 0;
     int preview_overlay_height = 0;
     std::vector<RuntimePreviewDetection> preview_detections;
+    std::string last_latency_event;
+    std::string last_latency_utc;
+    int last_latency_frames_from_first_read = -1;
+    int last_latency_ms_from_first_read = -1;
+    int last_latency_frames_from_readable = -1;
+    int last_latency_ms_from_readable = -1;
     std::chrono::steady_clock::time_point last_preview_write =
         std::chrono::steady_clock::time_point::min();
 };
 
+struct RuntimePipelineState {
+    std::string profile;
+    bool low_latency_rtsp = false;
+    int rtsp_latency_ms = 0;
+    bool rtsp_drop_on_latency = false;
+    int rtsp_protocols = 0;
+    bool latency_metrics = false;
+    bool valid = false;
+};
+
 static std::map<std::string, RuntimeSourceState> g_runtime_sources;
+static RuntimePipelineState g_runtime_pipeline;
 static std::chrono::steady_clock::time_point g_runtime_status_last_flush =
     std::chrono::steady_clock::time_point::min();
 
@@ -1027,7 +1050,9 @@ static void publish_live_event_async(const EvidenceEvent& ev, const std::string&
 
 void update_runtime_source_status(const std::string& case_id,
                                   const std::string& video_source,
-                                  int frame_number) {
+                                  int frame_number,
+                                  int frame_width,
+                                  int frame_height) {
     if (case_id.empty() || video_source.empty()) {
         return;
     }
@@ -1036,9 +1061,29 @@ void update_runtime_source_status(const std::string& case_id,
     RuntimeSourceState& source = g_runtime_sources[video_source];
     source.source = video_source;
     source.last_seen_utc = utc_now_iso8601();
-    source.last_frame_number = frame_number;
-
     auto now = std::chrono::steady_clock::now();
+    if (source.previous_fps_time == std::chrono::steady_clock::time_point::min()) {
+        source.previous_fps_time = now;
+        source.previous_fps_frame_number = frame_number;
+    } else {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - source.previous_fps_time);
+        int frame_delta = frame_number - source.previous_fps_frame_number;
+        if (elapsed.count() >= 1000 && frame_delta >= 0) {
+            source.fps = static_cast<double>(frame_delta) * 1000.0 /
+                         static_cast<double>(elapsed.count());
+            source.previous_fps_time = now;
+            source.previous_fps_frame_number = frame_number;
+        }
+    }
+    source.last_frame_number = frame_number;
+    if (frame_width > 0) {
+        source.frame_width = frame_width;
+    }
+    if (frame_height > 0) {
+        source.frame_height = frame_height;
+    }
+
     if (g_runtime_status_last_flush != std::chrono::steady_clock::time_point::min()) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - g_runtime_status_last_flush);
@@ -1055,6 +1100,14 @@ void update_runtime_source_status(const std::string& case_id,
     out << "{";
     out << "\"current_case_id\":\"" << json_escape(case_id) << "\",";
     out << "\"updated_utc\":\"" << json_escape(utc_now_iso8601()) << "\",";
+    if (g_runtime_pipeline.valid) {
+        out << "\"runtime_profile\":\"" << json_escape(g_runtime_pipeline.profile) << "\",";
+        out << "\"low_latency_rtsp\":" << (g_runtime_pipeline.low_latency_rtsp ? "true" : "false") << ",";
+        out << "\"rtsp_latency_ms\":" << g_runtime_pipeline.rtsp_latency_ms << ",";
+        out << "\"rtsp_drop_on_latency\":" << (g_runtime_pipeline.rtsp_drop_on_latency ? "true" : "false") << ",";
+        out << "\"rtsp_protocols\":" << g_runtime_pipeline.rtsp_protocols << ",";
+        out << "\"latency_metrics\":" << (g_runtime_pipeline.latency_metrics ? "true" : "false") << ",";
+    }
     out << "\"sources\":[";
 
     bool first = true;
@@ -1067,6 +1120,11 @@ void update_runtime_source_status(const std::string& case_id,
         out << "\"source\":\"" << json_escape(entry.second.source) << "\",";
         out << "\"last_seen_utc\":\"" << json_escape(entry.second.last_seen_utc) << "\",";
         out << "\"last_frame_number\":" << entry.second.last_frame_number;
+        out << ",\"fps\":" << std::fixed << std::setprecision(2) << entry.second.fps;
+        if (entry.second.frame_width > 0 && entry.second.frame_height > 0) {
+            out << ",\"frame_width\":" << entry.second.frame_width;
+            out << ",\"frame_height\":" << entry.second.frame_height;
+        }
         if (!entry.second.preview_path.empty()) {
             out << ",\"preview_path\":\"" << json_escape(entry.second.preview_path) << "\"";
         }
@@ -1100,6 +1158,14 @@ void update_runtime_source_status(const std::string& case_id,
             }
             out << "]";
         }
+        if (!entry.second.last_latency_event.empty()) {
+            out << ",\"last_latency_event\":\"" << json_escape(entry.second.last_latency_event) << "\"";
+            out << ",\"last_latency_utc\":\"" << json_escape(entry.second.last_latency_utc) << "\"";
+            out << ",\"last_latency_frames_from_first_read\":" << entry.second.last_latency_frames_from_first_read;
+            out << ",\"last_latency_ms_from_first_read\":" << entry.second.last_latency_ms_from_first_read;
+            out << ",\"last_latency_frames_from_readable\":" << entry.second.last_latency_frames_from_readable;
+            out << ",\"last_latency_ms_from_readable\":" << entry.second.last_latency_ms_from_readable;
+        }
         out << "}";
     }
 
@@ -1108,6 +1174,43 @@ void update_runtime_source_status(const std::string& case_id,
     if (write_text_file_atomic("runtime/alpr_status.json", out.str())) {
         g_runtime_status_last_flush = now;
     }
+}
+
+void update_runtime_pipeline_status(const std::string& profile,
+                                    bool low_latency_rtsp,
+                                    int rtsp_latency_ms,
+                                    bool rtsp_drop_on_latency,
+                                    int rtsp_protocols,
+                                    bool latency_metrics) {
+    std::lock_guard<std::mutex> lock(g_runtime_status_mutex);
+    g_runtime_pipeline.profile = profile;
+    g_runtime_pipeline.low_latency_rtsp = low_latency_rtsp;
+    g_runtime_pipeline.rtsp_latency_ms = rtsp_latency_ms;
+    g_runtime_pipeline.rtsp_drop_on_latency = rtsp_drop_on_latency;
+    g_runtime_pipeline.rtsp_protocols = rtsp_protocols;
+    g_runtime_pipeline.latency_metrics = latency_metrics;
+    g_runtime_pipeline.valid = true;
+}
+
+void update_runtime_latency_status(const std::string& video_source,
+                                   const std::string& event_type,
+                                   int frames_from_first_read,
+                                   int ms_from_first_read,
+                                   int frames_from_readable,
+                                   int ms_from_readable) {
+    if (video_source.empty()) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_runtime_status_mutex);
+    RuntimeSourceState& source = g_runtime_sources[video_source];
+    source.source = video_source;
+    source.last_latency_event = event_type;
+    source.last_latency_utc = utc_now_iso8601();
+    source.last_latency_frames_from_first_read = frames_from_first_read;
+    source.last_latency_ms_from_first_read = ms_from_first_read;
+    source.last_latency_frames_from_readable = frames_from_readable;
+    source.last_latency_ms_from_readable = ms_from_readable;
 }
 
 bool should_update_runtime_source_preview(const std::string& video_source) {

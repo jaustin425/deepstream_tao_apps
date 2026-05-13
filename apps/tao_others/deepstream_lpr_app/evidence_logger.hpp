@@ -79,7 +79,21 @@ bool ensure_session_json(const std::string& evidence_root,
 bool append_event_jsonl(const std::string& jsonl_path, const EvidenceEvent& ev);
 void update_runtime_source_status(const std::string& case_id,
                                   const std::string& video_source,
-                                  int frame_number);
+                                  int frame_number,
+                                  int frame_width = 0,
+                                  int frame_height = 0);
+void update_runtime_pipeline_status(const std::string& profile,
+                                    bool low_latency_rtsp,
+                                    int rtsp_latency_ms,
+                                    bool rtsp_drop_on_latency,
+                                    int rtsp_protocols,
+                                    bool latency_metrics);
+void update_runtime_latency_status(const std::string& video_source,
+                                   const std::string& event_type,
+                                   int frames_from_first_read,
+                                   int ms_from_first_read,
+                                   int frames_from_readable,
+                                   int ms_from_readable);
 bool should_update_runtime_source_preview(const std::string& video_source);
 void update_runtime_source_preview(const cv::Mat& frame,
                                    const std::string& video_source,

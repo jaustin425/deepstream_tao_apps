@@ -22,10 +22,23 @@
 
 alpr-runtime:
   profile: patrol-fast
-  low-latency-rtsp: 1
-  rtsp-latency-ms: 80
-  rtsp-drop-on-latency: 1
   latency-metrics: 1
+  profiles:
+    patrol-fast:
+      low-latency-rtsp: 1
+      rtsp-latency-ms: 80
+      rtsp-drop-on-latency: 1
+      rtsp-transport: tcp
+    axis-stable:
+      low-latency-rtsp: 0
+      rtsp-latency-ms: 200
+      rtsp-drop-on-latency: 0
+      rtsp-transport: tcp
+    axis-low-lag:
+      low-latency-rtsp: 0
+      rtsp-latency-ms: 120
+      rtsp-drop-on-latency: 0
+      rtsp-transport: tcp
 
 source-list:
   list: v4l2:///dev/v4l/by-path/platform-3610000.usb-usb-0:1.2:1.0-video-index0;rtsp://alpr:alpr@192.168.1.20/axis-media/media.amp

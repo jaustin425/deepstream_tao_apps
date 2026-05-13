@@ -9,6 +9,7 @@ RUNTIME_DIR="$APP_DIR/runtime"
 NETWORK_HELPER="$APP_DIR/scripts/configure_network_access.sh"
 BACKEND_PID_FILE="$RUNTIME_DIR/backend.pid"
 ALPR_PID_FILE="$RUNTIME_DIR/alpr.pid"
+START_LOCK_FILE="$RUNTIME_DIR/field_unit_start.lock"
 BACKEND_LOG="$LOG_DIR/backend.log"
 ALPR_LOG="$LOG_DIR/alpr.log"
 DEFAULT_CONFIG="$APP_DIR/../../../configs/app/lpr_app_us_config.yml"
@@ -18,6 +19,7 @@ BACKEND_PORT="${ALPR_DASHBOARD_PORT:-8080}"
 export ALPR_DASHBOARD_HOST="$BACKEND_HOST"
 export ALPR_DASHBOARD_PORT="$BACKEND_PORT"
 ALPR_CONFIG="${1:-$DEFAULT_CONFIG}"
+ALPR_PROFILE_OVERRIDE="${2:-}"
 
 if [[ "$ALPR_CONFIG" != /* ]]; then
   ALPR_CONFIG="$(realpath -m "$ALPR_CONFIG")"
@@ -29,6 +31,11 @@ if [[ ! -f "$ALPR_CONFIG" ]]; then
 fi
 
 export ALPR_ACTIVE_CONFIG_PATH="$ALPR_CONFIG"
+if [[ -n "$ALPR_PROFILE_OVERRIDE" ]]; then
+  export ALPR_RUNTIME_PROFILE="$ALPR_PROFILE_OVERRIDE"
+else
+  unset ALPR_RUNTIME_PROFILE
+fi
 
 resolve_backend_python() {
   local candidates=()
@@ -129,6 +136,12 @@ resolve_live_source_map() {
 
 mkdir -p "$LOG_DIR" "$RUNTIME_DIR"
 
+exec 9>"$START_LOCK_FILE"
+if ! flock -n 9; then
+  echo "Field unit start is already in progress."
+  exit 1
+fi
+
 maybe_enable_network_access
 
 if [[ -z "${ALPR_LIVE_SOURCE_MAP:-}" ]]; then
@@ -152,6 +165,20 @@ stop_pid_file() {
     kill "$(cat "$pid_file")" 2>/dev/null || true
   fi
   rm -f "$pid_file"
+}
+
+find_running_alpr_pids() {
+  local binary_path="$APP_DIR/deepstream-lpr-app"
+  local pids=()
+  mapfile -t pids < <(pgrep -f "$binary_path" 2>/dev/null || true)
+
+  for pid in "${pids[@]}"; do
+    [[ -z "$pid" || "$pid" == "$$" ]] && continue
+    local cmdline
+    cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+    [[ "$cmdline" == *"$binary_path"* ]] || continue
+    printf '%s\n' "$pid"
+  done
 }
 
 emit_alpr_failure_hint() {
@@ -207,6 +234,13 @@ if is_running "$ALPR_PID_FILE"; then
   exit 1
 fi
 
+RUNNING_ALPR_PIDS="$(find_running_alpr_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+if [[ -n "$RUNNING_ALPR_PIDS" ]]; then
+  echo "ALPR already running with PID(s): $RUNNING_ALPR_PIDS"
+  echo "Run ./stop_field_unit.sh first to clear stale or orphaned ALPR processes."
+  exit 1
+fi
+
 rm -f "$RUNTIME_DIR/alpr_status.json"
 
 printf '\n[%s] starting backend\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BACKEND_LOG"
@@ -245,6 +279,9 @@ fi
 
 echo "Backend PID: $(cat "$BACKEND_PID_FILE")"
 echo "ALPR PID: $(cat "$ALPR_PID_FILE")"
+if [[ -n "${ALPR_RUNTIME_PROFILE:-}" ]]; then
+  echo "ALPR runtime profile override: $ALPR_RUNTIME_PROFILE"
+fi
 print_dashboard_urls
 echo "Backend log: $BACKEND_LOG"
 echo "ALPR log: $ALPR_LOG"

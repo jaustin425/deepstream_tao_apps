@@ -26,14 +26,26 @@
 
 alpr-runtime:
   profile: axis-stable
-  low-latency-rtsp: 0
-  rtsp-latency-ms: 200
-  rtsp-drop-on-latency: 0
-  rtsp-transport: tcp
   latency-metrics: 1
+  profiles:
+    axis-stable:
+      low-latency-rtsp: 0
+      rtsp-latency-ms: 200
+      rtsp-drop-on-latency: 0
+      rtsp-transport: tcp
+    axis-low-lag:
+      low-latency-rtsp: 0
+      rtsp-latency-ms: 120
+      rtsp-drop-on-latency: 0
+      rtsp-transport: tcp
+    axis-fastest:
+      low-latency-rtsp: 1
+      rtsp-latency-ms: 80
+      rtsp-drop-on-latency: 1
+      rtsp-transport: tcp
 
 source-list:
-  list: rtsp://alpr:alpr@169.254.42.56/axis-media/media.amp?videocodec=h264&resolution=1280x720&fps=15
+  list: rtsp://alpr:alpr@169.254.42.56/axis-media/media.amp?videocodec=h264&resolution=1280x720&fps=20
 
 analytics:
   enable: 1
