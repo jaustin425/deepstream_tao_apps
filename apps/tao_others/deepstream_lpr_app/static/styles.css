@@ -731,6 +731,11 @@ main {
   color: #fff3a0;
 }
 
+.candidate {
+  background: #17476b;
+  color: #bfe8ff;
+}
+
 .hotlist-badge {
   background: #7f1d1d;
   color: #fecaca;

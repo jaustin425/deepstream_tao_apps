@@ -1021,7 +1021,7 @@ static std::string build_live_event_payload(const EvidenceEvent& ev,
 }
 
 static void publish_live_event_async(const EvidenceEvent& ev, const std::string& case_id) {
-    if (ev.event_type != "CONFIRMED" && ev.event_type != "LOCKED") {
+    if (ev.event_type != "CANDIDATE" && ev.event_type != "CONFIRMED" && ev.event_type != "LOCKED") {
         return;
     }
 
@@ -1941,6 +1941,40 @@ bool write_evidence_event(const cv::Mat& frame,
         publish_live_event_async(ev, case_id);
     }
     return json_ok;
+}
+
+bool publish_candidate_live_event(const std::string& evidence_root,
+                                  const std::string& video_source,
+                                  const std::string& model_version,
+                                  const std::string& plate,
+                                  int confidence,
+                                  int frame_number,
+                                  bool track_id_valid,
+                                  uint64_t track_id,
+                                  const std::string& ca_pattern) {
+    if (plate.size() < 5) return false;
+
+    if (!ensure_session_json(evidence_root, video_source, model_version)) {
+        return false;
+    }
+
+    EvidenceEvent ev;
+    ev.event_id = next_event_id();
+    ev.event_type = "CANDIDATE";
+    ev.plate = plate;
+    ev.confidence = confidence;
+    ev.frame_number = frame_number;
+    ev.track_id_valid = track_id_valid;
+    ev.track_id = track_id;
+    ev.video_source = video_source;
+    ev.timestamp_utc = utc_now_iso8601();
+    ev.model_version = model_version;
+    ev.notes = "lightweight candidate event for early hotlist precheck";
+    ev.ca_pattern = ca_pattern;
+    apply_latest_gps_fix(ev);
+
+    publish_live_event_async(ev, basename_from_path(evidence_root));
+    return true;
 }
 
 bool write_debug_event(const cv::Mat& frame,

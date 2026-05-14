@@ -1117,11 +1117,11 @@ function addEvent(event, options = {}) {
   applyEventRuntimeState(event, !isUpdate);
 
   // Determine whether this event should move to the top of the feed.
-  // Only move to top when: brand new entry, OR transitioning from CONFIRMED→LOCKED.
-  // Pure CONFIRMED→CONFIRMED updates stay in place to prevent card list churn.
+  // Only move to top when: brand new entry, OR transitioning into LOCKED.
+  // Lower-status updates stay in place to prevent card list churn.
   const moveToTop = !isUpdate || (incomingLocked && !wasLocked);
 
-  // When updating a CONFIRMED card in-place (not yet LOCKED), preserve the
+  // When updating a non-LOCKED card in-place, preserve the
   // currently-displayed image paths so the browser doesn't fetch a new image
   // for every intermediate confidence update.  Only swap images once the
   // event reaches LOCKED status (which carries the best annotated frame).

@@ -63,6 +63,7 @@ EVENT_DB_PATH = EVIDENCE_ROOT / "alpr_events.db"
 
 
 class EventStatus(str, Enum):
+    CANDIDATE = "CANDIDATE"
     CONFIRMED = "CONFIRMED"
     LOCKED = "LOCKED"
 
@@ -2658,7 +2659,11 @@ def live_display_id(event: LiveEvent) -> str:
 
 
 def event_sort_value(event: LiveEvent) -> tuple:
-    status_rank = 2 if event.status == EventStatus.LOCKED else 1
+    status_rank = {
+        EventStatus.CANDIDATE: 0,
+        EventStatus.CONFIRMED: 1,
+        EventStatus.LOCKED: 2,
+    }.get(event.status, 0)
     timestamp = parse_utc_iso(event.timestamp_utc) or datetime.fromtimestamp(0, tz=timezone.utc)
     return (status_rank, event.confidence, timestamp, event.frame_number)
 
@@ -2753,7 +2758,7 @@ def apply_hotlist_alert_policy(event: LiveEvent) -> LiveEvent:
 
     if event.status != EventStatus.LOCKED:
         event.hotlist_alert = False
-        event.hotlist_alert_reason = "locked-only"
+        event.hotlist_alert_reason = "candidate-only" if event.status == EventStatus.CANDIDATE else "locked-only"
         event.hotlist_alert_cooldown_until_utc = None
         return event
 
@@ -4099,6 +4104,17 @@ async def post_live_event(event: LiveEvent) -> LiveEvent:
     event = enrich_with_hotlist(event)
     event = apply_hotlist_alert_policy(event)
 
+    if incoming_status == EventStatus.CANDIDATE and not event.hotlist_hit:
+        total_elapsed_ms = (time.monotonic() - request_started_at) * 1000.0
+        log_live_perf(
+            "post_live_event",
+            total_elapsed_ms,
+            display_id=display_id,
+            status=event.status,
+            candidate="no-hit",
+        )
+        return event
+
     audio_cue = None
     if incoming_status == EventStatus.LOCKED:
         if event.hotlist_hit:
@@ -4129,8 +4145,8 @@ async def post_live_event(event: LiveEvent) -> LiveEvent:
             should_broadcast = False
         else:
             _confirmed_broadcast_times[display_id] = now_mono
-    else:
-        # LOCKED — clear throttle entry so future reads start fresh
+    elif incoming_status == EventStatus.LOCKED:
+        # LOCKED clears the throttle entry so future reads start fresh.
         _confirmed_broadcast_times.pop(display_id, None)
 
     broadcast_stats = await broadcast_event(event, audio_cue) if should_broadcast else {"elapsed_ms": 0.0, "client_count": len(clients), "dead_client_count": 0}

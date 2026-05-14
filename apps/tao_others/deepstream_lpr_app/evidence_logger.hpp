@@ -10,7 +10,7 @@ class Mat;
 
 struct EvidenceEvent {
     std::string event_id;
-    std::string event_type;   // CONFIRMED or LOCKED
+    std::string event_type;   // CANDIDATE, CONFIRMED, or LOCKED
     std::string plate;
     std::string vehicle_make;
     std::string vehicle_type;
@@ -120,6 +120,15 @@ bool write_evidence_event(const cv::Mat& frame,
                           int veh_left, int veh_top, int veh_width, int veh_height,
                           int plate_left, int plate_top, int plate_width, int plate_height,
                           const std::string& ca_pattern = "");
+bool publish_candidate_live_event(const std::string& evidence_root,
+                                  const std::string& video_source,
+                                  const std::string& model_version,
+                                  const std::string& plate,
+                                  int confidence,
+                                  int frame_number,
+                                  bool track_id_valid,
+                                  uint64_t track_id,
+                                  const std::string& ca_pattern = "");
 bool write_debug_event(const cv::Mat& frame,
                               const std::string& evidence_root,
                               const std::string& video_source,

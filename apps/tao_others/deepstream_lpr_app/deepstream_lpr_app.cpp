@@ -132,6 +132,9 @@ struct PlateTrack {
   std::string last_debug_plate;
   int last_debug_confidence = 0;
   int last_debug_frame = -1;
+  std::string last_candidate_plate;
+  int last_candidate_confidence = 0;
+  int last_candidate_frame = -1;
   std::string last_confirmed_plate;
   int last_confirmed_confidence = 0;
   int last_confirmed_frame = -1;
@@ -3071,9 +3074,12 @@ static int expected_class_score(char candidate, size_t pos, size_t len) {
 
 static int plate_event_rank(const std::string& event_type) {
   if (event_type == "LOCKED") {
-    return 2;
+    return 3;
   }
   if (event_type == "CONFIRMED") {
+    return 2;
+  }
+  if (event_type == "CANDIDATE") {
     return 1;
   }
   return 0;
@@ -4093,46 +4099,102 @@ osd_sink_pad_buffer_probe(GstPad *pad, GstPadProbeInfo *info, gpointer u_data) {
                     track.last_best = consensus_plate;
                 }
 
-                VehicleCropQuality vehicle_crop_quality =
-                  assess_vehicle_crop_quality(get_frame_mat(), vehicle_meta);
-                penalize_attribute_votes_for_bad_lighting(track, vehicle_crop_quality);
-                remember_large_vehicle_track_hints(track, attribute_observations);
+                bool plate_text_ready =
+                  is_valid_plate_text(consensus_plate) &&
+                  looks_like_reasonable_us_plate(consensus_plate) &&
+                  consensus_plate.find('?') == std::string::npos;
 
-                bool likely_large_vehicle =
-                  is_likely_large_vehicle_track(track, attribute_observations);
+                bool qualifies_for_candidate =
+                  best_votes >= 8 &&
+                  plate_text_ready &&
+                  conf.score >= 45 &&
+                  should_emit_track_event(consensus_plate, conf.score,
+                                          track.last_candidate_plate,
+                                          track.last_candidate_confidence,
+                                          track.last_candidate_frame,
+                                          frame_number);
 
-                VehicleAttributeVoteContext attribute_vote_context =
-                  build_vehicle_attribute_vote_context(vehicle_meta,
-                                                      consensus_plate,
-                                                      conf,
-                                                      best_votes,
-                                                      track.stable_frames,
-                                                      vehicle_crop_quality,
-                                                      likely_large_vehicle);
-                add_vehicle_attribute_votes(vehicle_meta,
+                if (qualifies_for_candidate) {
+                  bool source_ok = should_emit_source_plate_event(video_source,
+                                                                  "CANDIDATE",
+                                                                  consensus_plate,
+                                                                  conf.score,
+                                                                  frame_number);
+                  track.last_candidate_plate = consensus_plate;
+                  track.last_candidate_confidence = conf.score;
+                  track.last_candidate_frame = frame_number;
+
+                  if (source_ok) {
+                    log_plate_latency_event("CANDIDATE",
+                                            video_source,
+                                            consensus_plate,
                                             track,
-                                            attribute_observations,
-                                            attribute_vote_context);
-                add_visual_color_vote(track,
-                                      estimate_visual_vehicle_color(get_frame_mat(),
-                                                                    vehicle_meta,
-                                                                    obj_meta,
-                                                                    vehicle_crop_quality),
-                                      attribute_vote_context);
-                vehicle_attributes = resolve_vehicle_attributes(track);
-                apply_recent_plate_attribute_prior(consensus_plate,
+                                            frame_number,
+                                            now,
+                                            conf.score,
+                                            best_votes,
+                                            track.stable_frames);
+                    publish_candidate_live_event(g_evidence_root,
+                                                 video_source,
+                                                 kModelVersion,
+                                                 consensus_plate,
+                                                 conf.score,
+                                                 frame_number,
+                                                 track_id_valid,
+                                                 track_id,
+                                                 conf.ca_pattern_name);
+                  }
+                }
+
+                bool attribute_work_enabled =
+                  !attribute_observations.make.label.empty() ||
+                  !attribute_observations.type.label.empty() ||
+                  !attribute_observations.color.label.empty() ||
+                  should_log_large_vehicle_make_debug(consensus_plate);
+                VehicleCropQuality vehicle_crop_quality;
+                bool likely_large_vehicle = false;
+                if (attribute_work_enabled) {
+                  vehicle_crop_quality =
+                    assess_vehicle_crop_quality(get_frame_mat(), vehicle_meta);
+                  penalize_attribute_votes_for_bad_lighting(track, vehicle_crop_quality);
+                  remember_large_vehicle_track_hints(track, attribute_observations);
+
+                  likely_large_vehicle =
+                    is_likely_large_vehicle_track(track, attribute_observations);
+
+                  VehicleAttributeVoteContext attribute_vote_context =
+                    build_vehicle_attribute_vote_context(vehicle_meta,
+                                                        consensus_plate,
+                                                        conf,
+                                                        best_votes,
+                                                        track.stable_frames,
+                                                        vehicle_crop_quality,
+                                                        likely_large_vehicle);
+                  add_vehicle_attribute_votes(vehicle_meta,
+                                              track,
+                                              attribute_observations,
+                                              attribute_vote_context);
+                  add_visual_color_vote(track,
+                                        estimate_visual_vehicle_color(get_frame_mat(),
+                                                                      vehicle_meta,
+                                                                      obj_meta,
+                                                                      vehicle_crop_quality),
+                                        attribute_vote_context);
+                  vehicle_attributes = resolve_vehicle_attributes(track);
+                  apply_recent_plate_attribute_prior(consensus_plate,
+                                                     video_source,
+                                                     frame_number,
+                                                     vehicle_crop_quality,
+                                                     attribute_observations,
+                                                     vehicle_attributes);
+                  remember_recent_plate_attributes(consensus_plate,
                                                    video_source,
                                                    frame_number,
-                                                   vehicle_crop_quality,
+                                                   conf.score,
+                                                   track,
                                                    attribute_observations,
                                                    vehicle_attributes);
-                remember_recent_plate_attributes(consensus_plate,
-                                                 video_source,
-                                                 frame_number,
-                                                 conf.score,
-                                                 track,
-                                                 attribute_observations,
-                                                 vehicle_attributes);
+                }
 
                 if (should_log_large_vehicle_make_debug(consensus_plate)) {
                   bool prefer_pickup =
