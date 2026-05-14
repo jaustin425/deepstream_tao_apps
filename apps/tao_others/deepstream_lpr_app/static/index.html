@@ -5,7 +5,7 @@
   <title>ALPR Live</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <link rel="stylesheet" href="/static/styles.css?v=20260506-ui-throttle-7">
+  <link rel="stylesheet" href="/static/styles.css?v=20260513-live-compact-1">
 </head>
 <body>
 
@@ -25,59 +25,42 @@
     </div>
   </div>
 
-  <div class="controls">
-    <input id="search" placeholder="Search plate...">
+  <details id="filtersPanel" class="filters-panel">
+    <summary class="filters-summary">Search / Filters</summary>
+    <div class="controls">
+      <input id="search" placeholder="Search plate...">
 
-    <select id="sourceFilter">
-      <option value="">All Sources</option>
-      <option value="LF">LF</option>
-      <option value="RF">RF</option>
-      <option value="LR">LR</option>
-      <option value="RR">RR</option>
-    </select>
+      <select id="sourceFilter">
+        <option value="">All Sources</option>
+        <option value="LF">LF</option>
+        <option value="RF">RF</option>
+        <option value="LR">LR</option>
+        <option value="RR">RR</option>
+      </select>
 
-    <select id="statusFilter">
-      <option value="" selected>All</option>
-      <option value="LOCKED">Locked</option>
-      <option value="CONFIRMED">Confirmed</option>
-    </select>
+      <select id="statusFilter">
+        <option value="" selected>All</option>
+        <option value="LOCKED">Locked</option>
+        <option value="CONFIRMED">Confirmed</option>
+      </select>
 
-    <button id="hotlistOnlyBtn" class="toggle hotlist-toggle">Hotlist Only</button>
-    <button id="followBtn" class="toggle active">Auto Scroll On</button>
-    <button id="audioBtn" class="toggle active">Audio On</button>
-    <button id="testAlertBtn" class="toggle">Test Alert</button>
-    <button id="pauseBtn" class="pause-button">Pause<span id="pauseBadge" class="pause-badge hidden">0</span></button>
-  </div>
+      <button id="hotlistOnlyBtn" class="toggle hotlist-toggle">Hotlist Only</button>
+      <button id="followBtn" class="toggle active">Auto Scroll On</button>
+      <button id="audioBtn" class="toggle active">Audio On</button>
+      <button id="testAlertBtn" class="toggle">Test Alert</button>
+      <button id="pauseBtn" class="pause-button">Pause<span id="pauseBadge" class="pause-badge hidden">0</span></button>
+    </div>
+  </details>
 </header>
 
 <main>
   <section id="alprStatusBox" class="status-strip">
-    <div class="status-strip-header">
-      <div class="status-strip-label">ALPR STATUS</div>
-      <button id="statusToggleBtn" class="status-toggle hidden" type="button" aria-expanded="true" aria-controls="statusDetails">Collapse</button>
-    </div>
-    <div id="statusDetails">
-      <div class="status-row">
-        <div class="status-section-label">System Status</div>
-        <div class="status-strip-main">
-          <span id="alprAlive" class="status-chip">Unknown</span>
-        </div>
+    <div class="status-strip-header compact">
+      <div class="status-live-title">ALPR Live</div>
+      <div class="status-strip-main">
+        <span id="alprAlive" class="status-chip">UNKNOWN</span>
       </div>
-      <div class="status-row">
-        <div class="status-section-label">Access</div>
-        <div id="networkAccessList" class="network-access-list"></div>
-      </div>
-      <div class="status-row">
-        <div class="status-section-label">GPS</div>
-        <div class="gps-status-wrap">
-          <span id="gpsStatusChip" class="gps-status-chip gps-status-disconnected">DISCONNECTED</span>
-          <span id="gpsStatusDetail" class="gps-status-detail">MiFi GPS unavailable</span>
-        </div>
-      </div>
-      <div class="status-row">
-        <div class="status-section-label">Camera Status</div>
-        <div id="cameraStatusList" class="camera-status-list"></div>
-      </div>
+      <a class="status-config-link" href="/config">Config</a>
     </div>
   </section>
 
@@ -101,6 +84,6 @@
   <img id="imageViewerImg" class="image-viewer-img" alt="ALPR read image">
 </div>
 
-<script src="/static/app.js?v=20260506-ui-throttle-7"></script>
+<script src="/static/app.js?v=20260513-live-compact-1"></script>
 </body>
 </html>

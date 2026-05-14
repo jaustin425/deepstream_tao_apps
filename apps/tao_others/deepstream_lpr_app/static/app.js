@@ -76,10 +76,10 @@ function updateAlprStatus(alive) {
     text = "PROBLEM";
     alprStatusBox.classList.add("status-stopped");
   } else if (alive === true) {
-    text = "RUNNING";
+    text = "GOOD";
     alprStatusBox.classList.add("status-running");
   } else if (alive === false) {
-    text = "STOPPED";
+    text = "PROBLEM";
     alprStatusBox.classList.add("status-stopped");
   }
 
@@ -96,6 +96,9 @@ function syncAudioBanner() {
 }
 
 function syncStatusCollapse() {
+  if (!statusToggleBtn || !statusDetails) {
+    return;
+  }
   const mobile = mobileStatusMedia.matches;
   statusToggleBtn.classList.toggle("hidden", !mobile);
   const collapsed = mobile && statusCollapsed;
@@ -256,9 +259,11 @@ pauseBtn.onclick = () => {
   }
 };
 
-statusToggleBtn.onclick = () => {
-  setStatusCollapsed(!statusCollapsed);
-};
+if (statusToggleBtn) {
+  statusToggleBtn.onclick = () => {
+    setStatusCollapsed(!statusCollapsed);
+  };
+}
 
 followBtn.onclick = () => {
   followNew = !followNew;
@@ -776,69 +781,77 @@ function renderStatus(status) {
   lastKnownAlprAlive = status.alpr_process_alive;
   updateAlprStatus(status.alpr_process_alive);
 
-  networkAccessList.innerHTML = "";
-  const networkAccess = Array.isArray(status.network_access) ? status.network_access : [];
-  for (const item of networkAccess) {
-    const link = document.createElement("a");
-    link.className = `network-access-chip network-${String(item.medium || "network").toLowerCase()}`;
-    link.href = item.url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    const medium = String(item.medium || "network").toUpperCase();
-    const interfaceText = item.interface ? ` ${item.interface}` : "";
-    link.textContent = `${medium}${interfaceText} ${item.address}`;
-    link.title = item.note ? `${item.note} | ${item.url}` : item.url;
-    networkAccessList.appendChild(link);
+  if (networkAccessList) {
+    networkAccessList.innerHTML = "";
+    const networkAccess = Array.isArray(status.network_access) ? status.network_access : [];
+    for (const item of networkAccess) {
+      const link = document.createElement("a");
+      link.className = `network-access-chip network-${String(item.medium || "network").toLowerCase()}`;
+      link.href = item.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      const medium = String(item.medium || "network").toUpperCase();
+      const interfaceText = item.interface ? ` ${item.interface}` : "";
+      link.textContent = `${medium}${interfaceText} ${item.address}`;
+      link.title = item.note ? `${item.note} | ${item.url}` : item.url;
+      networkAccessList.appendChild(link);
+    }
   }
 
   const gpsStatus = status && status.gps_status ? status.gps_status : {};
   const gpsConnected = Boolean(gpsStatus.connected);
   const gpsFixValid = Boolean(gpsStatus.fix_valid);
-  gpsStatusChip.className = "gps-status-chip";
-  if (gpsConnected && gpsFixValid) {
-    gpsStatusChip.classList.add("gps-status-connected");
-    gpsStatusChip.textContent = "FIX";
-  } else if (gpsConnected) {
-    gpsStatusChip.classList.add("gps-status-warning");
-    gpsStatusChip.textContent = "NO FIX";
-  } else {
-    gpsStatusChip.classList.add("gps-status-disconnected");
-    gpsStatusChip.textContent = "DISCONNECTED";
+  if (gpsStatusChip) {
+    gpsStatusChip.className = "gps-status-chip";
+    if (gpsConnected && gpsFixValid) {
+      gpsStatusChip.classList.add("gps-status-connected");
+      gpsStatusChip.textContent = "FIX";
+    } else if (gpsConnected) {
+      gpsStatusChip.classList.add("gps-status-warning");
+      gpsStatusChip.textContent = "NO FIX";
+    } else {
+      gpsStatusChip.classList.add("gps-status-disconnected");
+      gpsStatusChip.textContent = "DISCONNECTED";
+    }
   }
 
-  const gpsParts = [];
-  if (gpsStatus.source) {
-    gpsParts.push(String(gpsStatus.source).toUpperCase());
+  if (gpsStatusDetail) {
+    const gpsParts = [];
+    if (gpsStatus.source) {
+      gpsParts.push(String(gpsStatus.source).toUpperCase());
+    }
+    if (gpsStatus.endpoint) {
+      gpsParts.push(String(gpsStatus.endpoint));
+    }
+    if (gpsFixValid) {
+      gpsParts.push(`${Number(gpsStatus.latitude).toFixed(6)}, ${Number(gpsStatus.longitude).toFixed(6)}`);
+    }
+    if (gpsStatus.last_received_utc) {
+      gpsParts.push(`Last ${formatDateTime(gpsStatus.last_received_utc)}`);
+    }
+    gpsStatusDetail.textContent = gpsParts.join(" | ") || "MiFi GPS unavailable";
   }
-  if (gpsStatus.endpoint) {
-    gpsParts.push(String(gpsStatus.endpoint));
-  }
-  if (gpsFixValid) {
-    gpsParts.push(`${Number(gpsStatus.latitude).toFixed(6)}, ${Number(gpsStatus.longitude).toFixed(6)}`);
-  }
-  if (gpsStatus.last_received_utc) {
-    gpsParts.push(`Last ${formatDateTime(gpsStatus.last_received_utc)}`);
-  }
-  gpsStatusDetail.textContent = gpsParts.join(" | ") || "MiFi GPS unavailable";
 
-  cameraStatusList.innerHTML = "";
-  const sourceHealth = Array.isArray(status.source_health) ? status.source_health : [];
-  for (const source of sourceHealth) {
-    const item = document.createElement("div");
-    item.className = `camera-pill ${source.available ? "camera-online" : "camera-offline"}`;
-    const lastSeen = formatTime(source.last_seen_utc);
-    item.title = `${source.source_label || source.source || "Camera"} | ${source.available ? "Online" : "Offline"} | Last ${lastSeen}`;
+  if (cameraStatusList) {
+    cameraStatusList.innerHTML = "";
+    const sourceHealth = Array.isArray(status.source_health) ? status.source_health : [];
+    for (const source of sourceHealth) {
+      const item = document.createElement("div");
+      item.className = `camera-pill ${source.available ? "camera-online" : "camera-offline"}`;
+      const lastSeen = formatTime(source.last_seen_utc);
+      item.title = `${source.source_label || source.source || "Camera"} | ${source.available ? "Online" : "Offline"} | Last ${lastSeen}`;
 
-    const dot = document.createElement("span");
-    dot.className = "camera-pill-dot";
+      const dot = document.createElement("span");
+      dot.className = "camera-pill-dot";
 
-    const label = document.createElement("span");
-    label.className = "camera-pill-label";
-    label.textContent = source.source || "?";
+      const label = document.createElement("span");
+      label.className = "camera-pill-label";
+      label.textContent = source.source || "?";
 
-    item.appendChild(dot);
-    item.appendChild(label);
-    cameraStatusList.appendChild(item);
+      item.appendChild(dot);
+      item.appendChild(label);
+      cameraStatusList.appendChild(item);
+    }
   }
 }
 
