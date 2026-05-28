@@ -312,6 +312,10 @@ show_status() {
 driver_up() {
   require_root
   require_tools
+  if modinfo mt76x0u >/dev/null 2>&1; then
+    load_mt76_modules
+    return
+  fi
   download_mt76_sources
   build_mt76_modules
   install_mt76_modules
