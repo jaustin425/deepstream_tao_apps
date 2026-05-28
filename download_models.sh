@@ -119,10 +119,10 @@ echo "==================================================================="
 echo "begin downloading CAR Plate models "
 echo "==================================================================="
 cd -
-mkdir -p ./models/trafficcamnet
-cd ./models/trafficcamnet
-wget --content-disposition 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/tao/trafficcamnet/pruned_onnx_v1.0.4/files?redirect=true&path=resnet18_trafficcamnet_pruned.onnx' -O resnet18_trafficcamnet_pruned.onnx
-wget --content-disposition 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/tao/trafficcamnet/pruned_onnx_v1.0.4/files?redirect=true&path=resnet18_trafficcamnet_pruned_int8.txt' -O resnet18_trafficcamnet_pruned_int8.txt
+mkdir -p ./models/dashcamnet
+cd ./models/dashcamnet
+wget --content-disposition 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/tao/dashcamnet/pruned_onnx_v1.0.4/files?redirect=true&path=labels.txt' -O labels_dashcamnet.txt
+wget --content-disposition 'https://api.ngc.nvidia.com/v2/models/org/nvidia/team/tao/dashcamnet/pruned_onnx_v1.0.4/files?redirect=true&path=resnet18_dashcamnet_pruned.onnx' -O resnet18_dashcamnet_pruned.onnx
 
 cd -
 mkdir -p ./models/LPD_us

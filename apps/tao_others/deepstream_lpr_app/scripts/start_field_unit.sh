@@ -246,7 +246,7 @@ rm -f "$RUNTIME_DIR/alpr_status.json"
 printf '\n[%s] starting backend\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$BACKEND_LOG"
 (
   cd "$APP_DIR"
-  nohup "$BACKEND_PYTHON" -m uvicorn app:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" >> "$BACKEND_LOG" 2>&1 &
+  nohup setsid "$BACKEND_PYTHON" -m uvicorn app:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" >> "$BACKEND_LOG" 2>&1 &
   echo $! > "$BACKEND_PID_FILE"
 )
 
@@ -265,7 +265,7 @@ printf '\n[%s] starting alpr\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$ALPR_LOG"
 (
   cd "$APP_DIR"
   export ALPR_LIVE_ENDPOINT="${ALPR_LIVE_ENDPOINT:-http://127.0.0.1:${BACKEND_PORT}/api/live-event}"
-  nohup "$APP_DIR/deepstream-lpr-app" "$ALPR_CONFIG" >> "$ALPR_LOG" 2>&1 &
+  nohup setsid "$APP_DIR/deepstream-lpr-app" "$ALPR_CONFIG" >> "$ALPR_LOG" 2>&1 &
   echo $! > "$ALPR_PID_FILE"
 )
 

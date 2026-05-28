@@ -12,13 +12,14 @@ PermissionsStartOnly=true
 WorkingDirectory=/home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app
 ExecStartPre=/bin/mkdir -p /home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/runtime /home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/logs
 ExecStartPre=/bin/chown -R jason:jason /home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/runtime /home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/logs
+ExecStartPre=/bin/bash -lc 'if [[ "${ALPR_PANDA_WIFI_ENABLE:-0}" == "1" ]]; then /home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/scripts/setup_panda_wifi.sh up; fi'
 ExecStart=/home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/scripts/start_field_unit.sh /home/jason/Projects/alpr-deepstream/deepstream_tao_apps/configs/app/lpr_app_us_axis_p12_dual.yml
 ExecStop=/home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/scripts/stop_field_unit.sh
 PIDFile=/home/jason/Projects/alpr-deepstream/deepstream_tao_apps/apps/tao_others/deepstream_lpr_app/runtime/alpr.pid
 RemainAfterExit=yes
 Restart=on-failure
 RestartSec=5
-TimeoutStartSec=20
+TimeoutStartSec=240
 TimeoutStopSec=20
 
 [Install]

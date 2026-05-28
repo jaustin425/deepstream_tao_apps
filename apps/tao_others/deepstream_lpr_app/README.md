@@ -24,7 +24,7 @@ The app now also supports optional vehicle attribute classifiers for color, type
 
 This pipeline is based on three TAO models below
 
-* Car detection model https://ngc.nvidia.com/catalog/models/nvidia:tao:trafficcamnet
+* Vehicle detection model https://catalog.ngc.nvidia.com/orgs/nvidia/teams/tao/models/dashcamnet
 * LPD (car license plate detection) model https://ngc.nvidia.com/catalog/models/nvidia:tao:lpdnet
 * LPR (car license plate recognization/text extraction) model https://ngc.nvidia.com/catalog/models/nvidia:tao:lprnet
 
@@ -377,7 +377,7 @@ Acknowledgement endpoint:
 1. This sample application only support mp4 files which contain H264 videos as input files.
 2. For Chinese plate recognition, please make sure the OS supports Chinese language.
 3. The second argument of deepstream-lpr-app should be 2(fakesink) for performance test.
-4. The trafficcamnet and LPD models are all INT8 models, the LPR model is FP16 model.
+4. The DashCamNet primary detector and LPD model run as TAO/DeepStream detector stages, and the LPR model is FP16.
 5. There is a bug for Triton gprc mode: the first two character can't be recognized.
 6. For some yolo models, some layers of the models should use FP32 precision. This is a network characteristics that the accuracy drops rapidly when maximum layers are run in INT8 precision. Please refer the [layer-device-precision](https://docs.nvidia.com/metropolis/deepstream/dev-guide/text/DS_plugin_gst-nvinfer.html) for more details.
 7. For Chinese plate recognition, please make sure the Chinese language support is in the OS. `Take Ubuntu as an example :`

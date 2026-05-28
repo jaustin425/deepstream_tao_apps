@@ -49,10 +49,8 @@ output:
 primary-gie:
   #0:nvinfer, 1:nvinfeserver
   plugin-type: 0
-  ##For car detection
-  config-file-path: ../nvinfer/trafficcamnet_tao/pgie_trafficcamnet_config.txt
-  # config-file-path: ../triton/trafficcamnet_tao/pgie_trafficcamnet_config.txt
-  # config-file-path: ../triton-grpc/trafficcamnet_tao/pgie_trafficcamnet_config.txt
+  ##For vehicle detection
+  config-file-path: ../nvinfer/dashcamnet_tao/pgie_dashcamnet_config.txt
   unique-id: 1
 
 secondary-gie0:

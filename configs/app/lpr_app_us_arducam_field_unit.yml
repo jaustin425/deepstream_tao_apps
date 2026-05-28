@@ -47,7 +47,7 @@ output:
 
 primary-gie:
   plugin-type: 0
-  config-file-path: ../nvinfer/trafficcamnet_tao/pgie_trafficcamnet_config.txt
+  config-file-path: ../nvinfer/dashcamnet_tao/pgie_dashcamnet_config.txt
   unique-id: 1
 
 secondary-gie0:
